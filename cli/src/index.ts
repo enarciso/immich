@@ -5,6 +5,7 @@ import path from 'node:path';
 import { upload } from 'src/commands/asset';
 import { login, logout } from 'src/commands/auth';
 import { serverInfo } from 'src/commands/server-info';
+import { storageS3Migrate, storageS3Plan, storageS3Verify } from 'src/commands/storage';
 import { version } from '../package.json';
 
 const defaultConfigDirectory = path.join(os.homedir(), '.config/immich/');
@@ -83,5 +84,45 @@ program
   )
   .argument('[paths...]', 'One or more paths to assets to be uploaded')
   .action((paths, options) => upload(paths, program.opts(), options));
+
+// storage subcommands
+const storage = program.command('storage').description('Storage utilities');
+
+storage
+  .command('s3-plan')
+  .description('Print suggested commands to migrate from local storage to S3')
+  .addOption(
+    new Option('--media-base <path>', 'Absolute path to Immich media directory (on the server host)')
+      .env('IMMICH_MEDIA_LOCATION')
+      .makeOptionMandatory(true),
+  )
+  .addOption(new Option('--bucket <name>', 'Destination S3 bucket').env('S3_BUCKET').makeOptionMandatory(true))
+  .addOption(new Option('--prefix <prefix>', 'Destination S3 prefix').env('S3_PREFIX'))
+  .addOption(new Option('--profile <name>', 'AWS CLI profile to use').env('AWS_PROFILE'))
+  .addOption(new Option('--tool <tool>', 'Tool to target: aws|s5cmd|both').choices(['aws', 's5cmd', 'both']))
+  .action((options) => storageS3Plan(program.opts(), options));
+
+storage
+  .command('s3-migrate')
+  .description('Execute a local-to-S3 sync using AWS CLI or s5cmd')
+  .addOption(
+    new Option('--media-base <path>', 'Absolute path to Immich media directory (on the server host)')
+      .env('IMMICH_MEDIA_LOCATION')
+      .makeOptionMandatory(true),
+  )
+  .addOption(new Option('--bucket <name>', 'Destination S3 bucket').env('S3_BUCKET').makeOptionMandatory(true))
+  .addOption(new Option('--prefix <prefix>', 'Destination S3 prefix').env('S3_PREFIX'))
+  .addOption(new Option('--profile <name>', 'AWS CLI profile to use').env('AWS_PROFILE'))
+  .addOption(new Option('--tool <tool>', 'Tool to use: auto|aws|s5cmd').choices(['auto', 'aws', 's5cmd']).default('auto'))
+  .addOption(new Option('--concurrency <number>', 'Concurrency (s5cmd: workers)').env('S3_MIGRATE_CONCURRENCY'))
+  .addOption(new Option('--dry-run', 'Preview without copying (aws: --dryrun, s5cmd: -n)'))
+  .action((options) => storageS3Migrate(program.opts(), options));
+
+storage
+  .command('s3-verify')
+  .description('Verify that assets on the server now reference s3:// paths')
+  .addOption(new Option('--sample <number>', 'Number of assets to sample').default(100))
+  .addOption(new Option('--expect-prefix <s3://bucket/prefix>', 'Expected S3 URI prefix for assets'))
+  .action((options) => storageS3Verify(program.opts(), options));
 
 program.parse(process.argv);

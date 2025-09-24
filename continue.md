@@ -63,6 +63,25 @@ Session Log
   - UX notes: group under `immich storage ...`; require admin API key for verify. No AWS SDK dependency; rely on installed CLI tools when executing.
   - Next step (if approved): scaffold commands without heavy logic, focusing on env detection, argument parsing, and clear instructions; add tests in `cli` for option parsing.
 
+- 2025-09-20 — Scaffold CLI storage commands
+  - Added `immich storage` group with:
+    - `s3-plan`: prints suggested `aws s3 sync` and `s5cmd sync` commands given `--media-base`, `--bucket`, and optional `--prefix`/`--profile`
+    - `s3-migrate`: executes a sync using detected tool (`s5cmd` preferred, fallback `aws`), supports `--dry-run`, `--concurrency`, `--tool`
+    - `s3-verify`: authenticates and samples assets via API to report how many have `originalPath` starting with `s3://`, optional `--expect-prefix`
+  - Files:
+    - `cli/src/commands/storage.ts` — new command implementations
+    - `cli/src/index.ts:1` — wired in `storage` subcommands and options
+  - Notes: kept changes dependency-free (no AWS SDK); commands focus on guidance and light execution. Further hardening can add richer server-side checks.
+
+- 2025-09-20 — Add unit tests for storage CLI
+  - Added `cli/src/commands/storage.spec.ts` covering:
+    - s3-plan: prints expected aws/s5cmd commands and profile
+    - s3-migrate: invokes correct tool/args for aws and s5cmd, auto-detects s5cmd; intercepts `process.exit`
+    - s3-verify: mocks auth + SDK to validate sample counting and prefix matching
+  - Notes: Local npm install errored (npm peer handling). Recommend running with repo-standard tooling:
+    - `pnpm --filter @immich/cli install && pnpm --filter @immich/cli run test`
+    - Ensure Node 22.19.0 and pnpm 10.14.0 per `mise.toml`
+
 - 2025-09-20 — Session start & guideline sync
   - Read `AGENTS.md`, `codex.md`, and `continue.md`; confirmed rules: small/surgical changes, preserve style, validate smallest scope, use preambles, maintain a plan for non-trivial work, and always update this log
   - Environment: approvals=never, sandbox=danger-full-access, network=enabled, cwd=`/workspace`
