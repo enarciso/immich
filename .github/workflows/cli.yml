@@ -1,16 +1,16 @@
 name: CLI Build
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'cli/**'
-      - '.github/workflows/cli.yml'
-  pull_request:
-    paths:
-      - 'cli/**'
-      - '.github/workflows/cli.yml'
-  release:
-    types: [published]
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - 'cli/**'
+  #     - '.github/workflows/cli.yml'
+  # pull_request:
+  #   paths:
+  #     - 'cli/**'
+  #     - '.github/workflows/cli.yml'
+  # release:
+  #   types: [published]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

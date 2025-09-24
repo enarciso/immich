@@ -1,10 +1,10 @@
 name: Docs build
-on:
-  push:
-    branches: [main]
-  pull_request:
-  release:
-    types: [published]
+# on:
+#   push:
+#     branches: [main]
+#   pull_request:
+#   release:
+#     types: [published]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

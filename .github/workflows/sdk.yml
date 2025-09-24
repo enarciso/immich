@@ -1,8 +1,8 @@
 name: Update Immich SDK
 
-on:
-  release:
-    types: [published]
+# on:
+#   release:
+#     types: [published]
 
 permissions: {}
 

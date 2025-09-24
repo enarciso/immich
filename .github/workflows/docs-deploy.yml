@@ -1,9 +1,9 @@
 name: Docs deploy
-on:
-  workflow_run: # zizmor: ignore[dangerous-triggers] no attacker inputs are used here
-    workflows: ['Docs build']
-    types:
-      - completed
+# on:
+#   workflow_run: # zizmor: ignore[dangerous-triggers] no attacker inputs are used here
+#     workflows: ['Docs build']
+#     types:
+#       - completed
 
 jobs:
   checks:

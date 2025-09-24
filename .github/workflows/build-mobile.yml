@@ -2,23 +2,23 @@ name: Build Mobile
 
 on:
   workflow_dispatch:
-  workflow_call:
-    inputs:
-      ref:
-        required: false
-        type: string
-    secrets:
-      KEY_JKS:
-        required: true
-      ALIAS:
-        required: true
-      ANDROID_KEY_PASSWORD:
-        required: true
-      ANDROID_STORE_PASSWORD:
-        required: true
-  pull_request:
-  push:
-    branches: [main]
+#   workflow_call:
+#     inputs:
+#       ref:
+#         required: false
+#         type: string
+#     secrets:
+#       KEY_JKS:
+#         required: true
+#       ALIAS:
+#         required: true
+#       ANDROID_KEY_PASSWORD:
+#         required: true
+#       ANDROID_STORE_PASSWORD:
+#         required: true
+#   pull_request:
+#   push:
+#     branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
