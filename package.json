@@ -9,7 +9,8 @@
   },
   "pnpm": {
     "overrides": {
-      "sharp": "0.34.3"
+      "canvas": "2.11.2",
+      "sharp": "^0.34.3"
     }
   }
 }
