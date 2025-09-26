@@ -48,6 +48,20 @@ Key Files/Configs
 
 Session Log
 
+- 2025-09-26 — Fix Docker build lockfile mismatch (pnpm overrides)
+  - Symptom: `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH` during `server/Dockerfile` CLI stage with `--frozen-lockfile` (compose prod build)
+  - Root cause: root `package.json` had `pnpm.overrides.sharp = 0.34.3` while `pnpm-lock.yaml` recorded `sharp: ^0.34.3`
+  - Fix: align overrides with lockfile (caret range) to avoid frozen lock mismatch
+    - package.json: set `pnpm.overrides.sharp` to `^0.34.3`
+    - server/package.json: set `overrides.sharp` to `^0.34.3` for consistency
+    - Next: re-run `docker compose -f docker/docker-compose.prod.yml build`
+
+- 2025-09-26 — Refresh lockfile for server deps
+  - Symptom: server stage failed with `ERR_PNPM_OUTDATED_LOCKFILE` due to new deps and version pin change
+  - Fix: regenerated lock without scripts to avoid Node 18 prep failures
+    - `pnpm -r --filter '!documentation' install --no-frozen-lockfile --ignore-scripts`
+  - Result: lock now includes `@aws-sdk/client-s3`, `@aws-sdk/lib-storage` and `nestjs-kysely@1.2.0`; frozen installs pass for web/cli filters
+
 - 2025-09-20 — Remove non-functioning server migrate-to-s3
   - Removed server admin CLI command: deleted `server/src/commands/migrate-to-s3.command.ts` and its import/registration in `server/src/commands/index.ts:1`
   - Rationale: command was non-functional and not part of supported workflows; reducing surface area avoids confusion
