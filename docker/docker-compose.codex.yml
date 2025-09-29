@@ -3,7 +3,6 @@ services:
     build:
       context: ${PWD}
       dockerfile: Dockerfile
-    container_name: codex-runner
     image: enarciso/codex-runner:latest
     pull_policy: always
     restart: no
