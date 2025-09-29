@@ -979,7 +979,10 @@ export class MetadataService extends BaseService {
   }
 
   private async getVideoTags(originalPath: string) {
-    const { videoStreams, format } = await this.mediaRepository.probe(originalPath);
+    // ffprobe requires a local file path; stage S3 objects to a temp file first
+    const staged = await this.stageInputIfS3(originalPath);
+    try {
+      const { videoStreams, format } = await this.mediaRepository.probe(staged.localPath);
 
     const tags: Pick<ImmichTags, 'Duration' | 'Orientation'> = {};
 
@@ -1008,6 +1011,9 @@ export class MetadataService extends BaseService {
       tags.Duration = Duration.fromObject({ seconds: format.duration }).toFormat('hh:mm:ss.SSS');
     }
 
-    return tags;
+      return tags;
+    } finally {
+      await staged.cleanup();
+    }
   }
 }

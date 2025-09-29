@@ -2,7 +2,7 @@
 
 This file captures durable context, decisions, and next steps so work can resume smoothly after restarts.
 
-Last updated: 2025-09-20
+Last updated: 2025-09-29
 
 Repository Map (high level)
 
@@ -47,6 +47,12 @@ Key Files/Configs
 - OpenAPI generator script: `open-api/bin/generate-open-api.sh`
 
 Session Log
+
+- 2025-09-29 — Fix ffprobe on S3 in metadata service
+  - Symptom: ffprobe error "Invalid data found when processing input" when extracting video tags; plus intermittent NoSuchKey in video encode jobs
+  - Root cause: metadata service called ffprobe on S3 URIs directly; ffprobe requires a local file
+  - Change: stage S3 originals to a temp file before probing in `server/src/services/metadata.service.ts:1`
+  - Validation: static analysis; aligns with existing staging pattern used for exiftool/stat
 
 - 2025-09-26 — Fix Docker build lockfile mismatch (pnpm overrides)
   - Symptom: `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH` during `server/Dockerfile` CLI stage with `--frozen-lockfile` (compose prod build)
