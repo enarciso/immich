@@ -12,7 +12,7 @@ WORKDIR /usr/src/app
 COPY ./package* ./pnpm* .pnpmfile.cjs ./
 COPY ./server ./server/
 RUN SHARP_IGNORE_GLOBAL_LIBVIPS=true pnpm --filter immich --no-frozen-lockfile build && \
-  SHARP_FORCE_GLOBAL_LIBVIPS=true pnpm --filter immich --no-frozen-lockfile --prod --no-optional deploy /output/server-pruned
+  SHARP_IGNORE_GLOBAL_LIBVIPS=true pnpm --filter immich --no-frozen-lockfile --prod deploy /output/server-pruned
 
 FROM builder AS web
 

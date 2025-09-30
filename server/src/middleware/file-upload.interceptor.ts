@@ -182,6 +182,7 @@ export class FileUploadInterceptor implements NestInterceptor {
       .then(({ stream, done }) => {
         file.stream.pipe(monitor).pipe(stream);
         stream.on('error', (err) => {
+          this.logger.error('S3 upload stream error', { path: uploadPath, error: (err as Error)?.message || err });
           hash.destroy();
           callback(err as Error);
         });
@@ -190,13 +191,17 @@ export class FileUploadInterceptor implements NestInterceptor {
             await done();
             const checksum = hash.digest();
             callback(null, { path: uploadPath, size: bytes, checksum } as Partial<ImmichFile>);
-          } catch (err) {
+          } catch (err: any) {
+            this.logger.error('S3 upload finalize error', { path: uploadPath, error: err?.message || err });
             hash.destroy();
             callback(err as Error);
           }
         });
       })
-      .catch((err) => callback(err as Error));
+      .catch((err) => {
+        this.logger.error('Failed to start S3 upload stream', { path: uploadPath, error: (err as Error)?.message || err });
+        callback(err as Error);
+      });
   }
 
   private removeFile(request: AuthRequest, file: Express.Multer.File, callback: (error: Error | null) => void) {

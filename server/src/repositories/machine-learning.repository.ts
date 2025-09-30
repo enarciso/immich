@@ -223,12 +223,20 @@ export class MachineLearningRepository {
           sse: s3c.sse as any,
           sseKmsKeyId: s3c.sseKmsKeyId,
         });
-        const stream = await s3.readStream(payload.imagePath);
-        const chunks: Buffer[] = [];
-        for await (const chunk of stream) {
-          chunks.push(Buffer.from(chunk));
+        try {
+          const stream = await s3.readStream(payload.imagePath);
+          const chunks: Buffer[] = [];
+          for await (const chunk of stream) {
+            chunks.push(Buffer.from(chunk));
+          }
+          fileBuffer = Buffer.concat(chunks);
+        } catch (error: any) {
+          this.logger.error('Failed to read S3 object for ML processing', {
+            originalPath: payload.imagePath,
+            error: error?.message || error,
+          });
+          throw error;
         }
-        fileBuffer = Buffer.concat(chunks);
       } else {
         fileBuffer = await readFile(payload.imagePath);
       }

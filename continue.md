@@ -54,6 +54,31 @@ Session Log
   - Change: stage S3 originals to a temp file before probing in `server/src/services/metadata.service.ts:1`
   - Validation: static analysis; aligns with existing staging pattern used for exiftool/stat
 
+- 2025-09-29 — Add S3 staging/read error logs with originalPath
+  - MediaService: log path on staging failures in `stageInputIfS3`
+  - MetadataService: log path on staging failures in `stageInputIfS3`
+  - DownloadService: log path when `readStream` fails while zipping originals
+  - MachineLearningRepository: log path when `readStream` fails for ML uploads
+  - sendFile: include `path` in error log when streaming fails
+
+- 2025-09-29 — Add S3 write-path error logs (uploads/finalize)
+  - FileUploadInterceptor: log path on S3 stream error, start failure, and finalize failure
+  - MediaService: log path when S3 finalize (`putObject`) fails in `stageOutputIfS3`
+  - BackupService: include path for S3 stream start/finalize errors during DB backup uploads
+
+- 2025-09-30 — Fix Docker build sharp failure (source build headers fetch)
+  - Symptom: server/Dockerfile deploy step forces sharp to build from source with SHARP_FORCE_GLOBAL_LIBVIPS, node-gyp tries to fetch Node headers and fails (EAI_AGAIN)
+  - Change: use SHARP_IGNORE_GLOBAL_LIBVIPS for deploy as well, avoiding source build and relying on prebuilt sharp binary
+  - File: `server/Dockerfile:14`
+  - Next: `docker compose -f docker/docker-compose.prod.yml build --no-cache immich-server`
+
+- 2025-09-30 — Fix runtime sharp error (linux-x64 runtime missing)
+  - Symptom: "Could not load the sharp module using the linux-x64 runtime" at container start
+  - Root cause: deploy used `--no-optional`, pruning sharp's platform packages (e.g. @img/sharp-linux-x64)
+  - Change: remove `--no-optional` from server deploy so optional runtime deps are included
+  - File: `server/Dockerfile:14`
+  - Next: rebuild server image; runtime should pick up prebuilt sharp
+
 - 2025-09-26 — Fix Docker build lockfile mismatch (pnpm overrides)
   - Symptom: `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH` during `server/Dockerfile` CLI stage with `--frozen-lockfile` (compose prod build)
   - Root cause: root `package.json` had `pnpm.overrides.sharp = 0.34.3` while `pnpm-lock.yaml` recorded `sharp: ^0.34.3`

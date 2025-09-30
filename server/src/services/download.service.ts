@@ -126,8 +126,16 @@ export class DownloadService extends BaseService {
           this.logger.warn('S3 path detected but S3 is not configured; skipping', { originalPath });
           continue;
         }
-        const stream = await s3.readStream(originalPath);
-        zip.addStream(stream, filename);
+        try {
+          const stream = await s3.readStream(originalPath);
+          zip.addStream(stream, filename);
+        } catch (error: any) {
+          this.logger.error('Failed to read S3 object for download', {
+            originalPath,
+            error: error?.message || error,
+          });
+          throw error;
+        }
       } else {
         let realpath = originalPath;
         try {

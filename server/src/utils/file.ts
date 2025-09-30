@@ -51,8 +51,9 @@ export const sendFile = async (
   const _sendFile = (path: string, options: SendFileOptions) =>
     promisify<string, SendFileOptions>(res.sendFile).bind(res)(path, options);
 
+  let file: ImmichFileResponse | undefined;
   try {
-    const file = await handler();
+    file = await handler();
     const cacheControlHeader = cacheControlHeaders[file.cacheControl];
     if (cacheControlHeader) {
       // set the header to Cache-Control
@@ -107,7 +108,7 @@ export const sendFile = async (
 
     // log non-http errors
     if (error instanceof HttpException === false) {
-      logger.error(`Unable to send file: ${error}`, error.stack);
+      logger.error('Unable to send file', { path: file?.path, error: error?.message || error, stack: error?.stack });
     }
 
     res.header('Cache-Control', 'none');

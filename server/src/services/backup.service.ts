@@ -184,7 +184,10 @@ export class BackupService extends BaseService {
               gzip.stdout.pipe(stream);
             })
             .catch((err) => {
-              this.logger.error(`Failed to start S3 upload stream: ${err}`);
+              this.logger.error('Failed to start S3 upload stream', {
+                path: backupFilePath,
+                error: (err as Error)?.message || err,
+              });
               reject(err);
             });
         } else {
@@ -233,7 +236,15 @@ export class BackupService extends BaseService {
           }
           // Ensure S3 multipart upload has completed
           if (s3Finalize) {
-            s3Finalize().then(() => resolve()).catch((err) => reject(err));
+            s3Finalize()
+              .then(() => resolve())
+              .catch((err) => {
+                this.logger.error('Failed to finalize S3 upload', {
+                  path: backupFilePath,
+                  error: (err as Error)?.message || err,
+                });
+                reject(err);
+              });
           } else {
             resolve();
           }

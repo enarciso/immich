@@ -205,8 +205,13 @@ export class MetadataService extends BaseService {
     const s3 = this.getS3()!;
     const tmp = StorageCore.getTempPathInDir(os.tmpdir());
     await fs.mkdir(tmp.substring(0, tmp.lastIndexOf('/')), { recursive: true }).catch(() => {});
-    const stream = await s3.readStream(path);
-    await pipeline(stream, createWriteStream(tmp));
+    try {
+      const stream = await s3.readStream(path);
+      await pipeline(stream, createWriteStream(tmp));
+    } catch (error: any) {
+      this.logger.error('Failed to stage S3 input', { originalPath: path, error: error?.message || error });
+      throw error;
+    }
     return { localPath: tmp, cleanup: () => fs.rm(tmp, { force: true }).then(() => {}) };
   }
 
