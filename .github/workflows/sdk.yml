@@ -1,6 +1,7 @@
 name: Update Immich SDK
 
-# on:
+on:
+  workflow_dispatch:
 #   release:
 #     types: [published]
 

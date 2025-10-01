@@ -1,7 +1,7 @@
 name: Merge translations
 
-# on:
-#   workflow_dispatch:
+on:
+  workflow_dispatch:
 #   workflow_call:
 #     secrets:
 #       PUSH_O_MATIC_APP_ID:

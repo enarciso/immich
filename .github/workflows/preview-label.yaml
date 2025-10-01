@@ -1,6 +1,7 @@
 name: Preview label
 
-# on:
+on:
+  workflow_dispatch:
 #   pull_request:
 #     types: [labeled, closed]
 

@@ -1,6 +1,7 @@
 name: Fix formatting
 
-# on:
+on:
+  workflow_dispatch:
 #   pull_request:
 #     types: [labeled]
 
