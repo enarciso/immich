@@ -1,26 +1,26 @@
 name: Prepare new release
 
-on:
-  workflow_dispatch:
-    inputs:
-      serverBump:
-        description: 'Bump server version'
-        required: true
-        default: 'false'
-        type: choice
-        options:
-          - 'false'
-          - major
-          - minor
-          - patch
-      mobileBump:
-        description: 'Bump mobile build number'
-        required: false
-        type: boolean
-      skipTranslations:
-        description: 'Skip translations'
-        required: false
-        type: boolean
+# on:
+#   workflow_dispatch:
+#     inputs:
+#       serverBump:
+#         description: 'Bump server version'
+#         required: true
+#         default: 'false'
+#         type: choice
+#         options:
+#           - 'false'
+#           - major
+#           - minor
+#           - patch
+#       mobileBump:
+#         description: 'Bump mobile build number'
+#         required: false
+#         type: boolean
+#       skipTranslations:
+#         description: 'Skip translations'
+#         required: false
+#         type: boolean
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-root

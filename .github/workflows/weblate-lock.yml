@@ -1,14 +1,14 @@
 name: Weblate checks
 
-on:
-  pull_request:
-    branches: [main]
-    types:
-      - opened
-      - synchronize
-      - ready_for_review
-      - auto_merge_enabled
-      - auto_merge_disabled
+# on:
+#   pull_request:
+#     branches: [main]
+#     types:
+#       - opened
+#       - synchronize
+#       - ready_for_review
+#       - auto_merge_enabled
+#       - auto_merge_disabled
 
 permissions: {}
 

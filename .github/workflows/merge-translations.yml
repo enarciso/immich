@@ -1,20 +1,20 @@
 name: Merge translations
 
-on:
-  workflow_dispatch:
-  workflow_call:
-    secrets:
-      PUSH_O_MATIC_APP_ID:
-        required: true
-      PUSH_O_MATIC_APP_KEY:
-        required: true
-      WEBLATE_TOKEN:
-        required: true
-    inputs:
-      skip:
-        description: 'Skip translations'
-        required: false
-        type: boolean
+# on:
+#   workflow_dispatch:
+#   workflow_call:
+#     secrets:
+#       PUSH_O_MATIC_APP_ID:
+#         required: true
+#       PUSH_O_MATIC_APP_KEY:
+#         required: true
+#       WEBLATE_TOKEN:
+#         required: true
+#     inputs:
+#       skip:
+#         description: 'Skip translations'
+#         required: false
+#         type: boolean
 
 permissions: {}
 

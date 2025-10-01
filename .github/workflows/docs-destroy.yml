@@ -1,7 +1,7 @@
 name: Docs destroy
-on:
-  pull_request_target: # zizmor: ignore[dangerous-triggers] no attacker inputs are used here
-    types: [closed]
+# on:
+#   pull_request_target: # zizmor: ignore[dangerous-triggers] no attacker inputs are used here
+#     types: [closed]
 
 permissions: {}
 

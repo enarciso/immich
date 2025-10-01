@@ -1,8 +1,8 @@
 on:
-  issues:
-    types: [opened]
-  discussion:
-    types: [created]
+  # issues:
+  #   types: [opened]
+  # discussion:
+  #   types: [created]
 
 name: Close likely duplicates
 permissions: {}
