@@ -65,7 +65,7 @@ export const sendFile = async (
       res.header('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(file.fileName)}`);
     }
 
-    // S3 streaming path
+    // S3 streaming path (with HTTP Range support for video/audio playback)
     if (file.path.startsWith('s3://')) {
       const env = new ConfigRepository().getEnv();
       const s3c = env.storage.s3;
@@ -85,10 +85,43 @@ export const sendFile = async (
         sseKmsKeyId: s3c.sseKmsKeyId,
       });
       const head = await s3.head(file.path).catch(() => undefined);
-      const stream = await s3.readStream(file.path);
-      if (head?.size) {
-        res.header('Content-Length', String(head.size));
+      const totalSize = Number(head?.size || 0);
+
+      // Advertise range support
+      res.header('Accept-Ranges', 'bytes');
+
+      const rangeHeader = (res as any)?.req?.headers?.['range'] as string | undefined;
+      if (rangeHeader && totalSize > 0) {
+        const m = /^bytes=(\d+)-(\d+)?$/.exec(rangeHeader.trim());
+        if (m) {
+          const start = Number(m[1]);
+          let end = typeof m[2] !== 'undefined' ? Number(m[2]) : totalSize - 1;
+          if (Number.isNaN(start) || Number.isNaN(end) || start >= totalSize || end >= totalSize || start > end) {
+            // invalid range
+            res.status(416);
+            res.header('Content-Range', `bytes */${totalSize}`);
+            res.end();
+            return;
+          }
+          const length = end - start + 1;
+          res.status(206);
+          res.header('Content-Range', `bytes ${start}-${end}/${totalSize}`);
+          res.header('Content-Length', String(length));
+          const stream = await s3.readStream(file.path, { start, end });
+          await new Promise<void>((resolve, reject) => {
+            stream.on('error', reject);
+            stream.on('end', () => resolve());
+            stream.pipe(res);
+          });
+          return;
+        }
       }
+
+      // No/invalid range: stream full object
+      if (totalSize > 0) {
+        res.header('Content-Length', String(totalSize));
+      }
+      const stream = await s3.readStream(file.path);
       await new Promise<void>((resolve, reject) => {
         stream.on('error', reject);
         stream.on('end', () => resolve());

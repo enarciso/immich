@@ -76,3 +76,12 @@ Open Questions / TODOs
 
 - [ ] On first functional change, run package-level checks before submitting.
 - [ ] If touching storage or media pipelines, run `make sql` and relevant server tests.
+
+2025-10-17 — Fix S3 video playback (HTTP Range)
+
+- Symptom: Remote (not locally stored) videos fail to play when `IMMICH_STORAGE_ENGINE=s3`.
+- Root cause: S3 streaming path in `sendFile` did not implement HTTP Range requests; many players (AVPlayer/ExoPlayer) require 206 Partial Content for seeking/streaming.
+- Changes:
+  - Implemented Range support in `server/src/utils/file.ts` for S3 paths: parses `Range` header, sets `Accept-Ranges`, `Content-Range`, `Content-Length`, responds with 206, and calls `s3.readStream` with byte range.
+  - Added AWS SDK dependencies to `server/package.json` and fixed a TS implicit-any in `server/src/storage/s3-backend.ts`.
+- Validation: Static analysis + build. Fixed TS type error (avoid returning Response from `sendFile`) and ensured S3 backend compiles. Playback endpoint `GET /asset/:id/video/playback` uses `sendFile` so clients receive proper 206 responses.
