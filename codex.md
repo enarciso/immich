@@ -16,11 +16,11 @@ Golden Rules
 - Prefer repository standards and patterns over novel approaches.
 - Do not commit changes or create branches unless explicitly asked; use patches in this environment.
 
-Environment & Privileges
+Environment & Versions
 
+- Node: 22.20.0 (mise/volta). pnpm: 10.18.1.
 - Filesystem: Full access within the workspace.
 - Network: Enabled — you may research and install packages when justified.
-- Sudo: Allowed — you may run `sudo` and `sudo docker compose` when required.
 - Docker: Available — use Docker/Compose for dev, prod, and e2e stacks.
 
 Core Workflows
@@ -43,9 +43,9 @@ Core Workflows
   - Tests: `pnpm --filter immich-e2e run test` and `test:web`
 
 - OpenAPI regeneration:
-  - Build server → `pnpm --filter immich build`
-  - Sync → `pnpm --filter immich run sync:open-api`
-  - Generate → `make open-api` or `make open-api-typescript`
+  - Preferred: `make open-api` (builds server, syncs spec, generates Dart + TS SDKs)
+  - Typescript only: `make open-api-typescript`
+  - Manual (if needed): Build server → Sync spec → `open-api/bin/generate-open-api.sh`
 
 Task Execution Pattern
 
@@ -56,6 +56,14 @@ Task Execution Pattern
 5) Validate: Run the smallest set of checks and tests that exercise the change.
 6) Summarize: Report what changed, where, why, and how it was verified.
 7) Memory: Update `continue.md` with decisions, commands, and next steps.
+
+Server Architecture Quick Reference
+
+- Framework: NestJS 11; tests via Vitest. DB via Kysely with Postgres. Queues via BullMQ.
+- Storage: Local FS or S3 via `S3AppStorageBackend`; S3-aware path joins and move/copy semantics.
+- Media pipeline: ffmpeg (fluent-ffmpeg), sharp, exiftool. Stages S3 inputs/outputs locally as needed.
+- Config: `server/src/dtos/env.dto.ts` and `server/src/repositories/config.repository.ts` map env → runtime config.
+- Observability: OpenTelemetry metrics configurable via `IMMICH_TELEMETRY_INCLUDE`.
 
 Messaging Style
 
@@ -75,6 +83,7 @@ Safety & Boundaries
 - Don’t introduce unrelated dependency upgrades.
 - Don’t run destructive DB ops or remove volumes unless requested.
 - If a change ripples across packages (API contract changes), coordinate: regenerate OpenAPI and update consumers.
+ - Respect workspace overrides (e.g., `sharp@^0.34.4`).
 
 When to Use Network/Sudo
 
@@ -106,4 +115,3 @@ Memory Protocol (continue.md)
   - Open questions, TODOs, and next steps
   - Any environment assumptions or versions that matter
 - On session start, read `continue.md` to reconstruct context and resume.
-

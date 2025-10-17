@@ -114,7 +114,7 @@ export class S3AppStorageBackend implements IAppStorageBackend {
     });
     const promise = uploader.done();
     // If the multipart upload fails, propagate error to the writable side so callers can fail fast
-    promise.catch((err) => pt.destroy(err as Error));
+    promise.catch((err: unknown) => pt.destroy(err as Error));
     const done = () => promise.then(() => {});
     return { stream: pt, done };
   }
