@@ -85,3 +85,10 @@ Open Questions / TODOs
   - Implemented Range support in `server/src/utils/file.ts` for S3 paths: parses `Range` header, sets `Accept-Ranges`, `Content-Range`, `Content-Length`, responds with 206, and calls `s3.readStream` with byte range.
   - Added AWS SDK dependencies to `server/package.json` and fixed a TS implicit-any in `server/src/storage/s3-backend.ts`.
 - Validation: Static analysis + build. Fixed TS type error (avoid returning Response from `sendFile`) and ensured S3 backend compiles. Playback endpoint `GET /asset/:id/video/playback` uses `sendFile` so clients receive proper 206 responses.
+
+2025-10-17 — Docker web build OOM mitigation
+
+- Symptom: `vite build` for `immich-web` aborted with "JavaScript heap out of memory" in Docker build stage.
+- Root cause: Node default heap (~2GB) too low for SSR + client builds inside constrained builder image.
+- Change: set `NODE_OPTIONS=--max-old-space-size=4096` for the web build RUN step in `server/Dockerfile`.
+- Validation: should allow the web build stage to complete without OOM; no runtime impact since it’s only applied during the build step.
