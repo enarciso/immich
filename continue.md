@@ -77,6 +77,13 @@ Open Questions / TODOs
 - [ ] On first functional change, run package-level checks before submitting.
 - [ ] If touching storage or media pipelines, run `make sql` and relevant server tests.
 
+2025-11-03 — Fix prod Docker build (lockfile mismatch)
+
+- Symptom: `docker compose -f docker/docker-compose.prod.yml build` fails in `immich-server` stage with `ERR_PNPM_OUTDATED_LOCKFILE` because `pnpm-lock.yaml` didn’t include newly added `server` deps (`@aws-sdk/client-s3`, `@aws-sdk/lib-storage`).
+- Root cause: Dependencies were added in `server/package.json` without regenerating the workspace lockfile.
+- Action: Updated the workspace lockfile only: `pnpm -r --filter '!documentation' install --lockfile-only`. Verified the lock now contains `@aws-sdk/client-s3` and `@aws-sdk/lib-storage`.
+- Next: Re-run build: `docker compose -f docker/docker-compose.prod.yml build --no-cache --progress=plain`. If web OOMs during build, set `NODE_OPTIONS=--max-old-space-size=4096` for the web build step as noted earlier.
+
 2025-10-17 — Fix S3 video playback (HTTP Range)
 
 - Symptom: Remote (not locally stored) videos fail to play when `IMMICH_STORAGE_ENGINE=s3`.
