@@ -77,6 +77,40 @@ Open Questions / TODOs
 - [ ] On first functional change, run package-level checks before submitting.
 - [ ] If touching storage or media pipelines, run `make sql` and relevant server tests.
 
+2025-11-03 — Investigate Kysely migration error
+
+- Input: Production dump `docker/library/photos/backups/immich-db-backup-20251102T180000-v2.1.0-pg14.19.sql.gz`.
+- Findings: `public.kysely_migrations` and `public.kysely_migrations_lock` exist with expected schema and owners (immich). Data shows 3 applied migrations; lock row present with `is_locked=0`.
+- Code alignment: Server config uses `migrationTableName: 'kysely_migrations'` and `migrationLockTableName: 'kysely_migrations_lock'` (server/src/repositories/database.repository.ts).
+- Likely causes in the field:
+  - Connecting to a different DB/schema (table not found); or
+  - Lock stuck (`is_locked=1`); or
+  - DB has migrations not present in FS (mismatch) or vice versa; or
+  - Column mismatch in a custom DB (rare).
+- Remediation (safe): Ensure tables exist with correct schema; upsert lock row to 0; verify search_path includes `public`; then run migrations.
+- SQL used (idempotent core): create tables if missing; insert lock row with ON CONFLICT; compare DB names vs FS.
+- Next: If error persists, capture exact server log line for targeted fix.
+
+2025-11-03 — Resolve corrupted migrations (unordered)
+
+- Symptom: Kysely error expecting 1761078763279 at index 35 but 1758705774125 was found; executed set not a prefix of filesystem.
+- Root cause: DB missing three OCR migrations while server image included them; later migration (AddAppVersionColumnToSession) already recorded.
+- Attempts: Backfill + idempotent DDL for OCR tables/column, then mark as executed → server image didn’t match order; rolled back OCR entries and objects.
+- Fix: Run migrations once with unordered allowed against compose DB:
+  - Command: `docker compose run --rm -e IMMICH_ENV=development -e DB_URL=postgres://immich:<url-encoded-pass>@database:5432/immich immich-server node /usr/src/app/server/dist/bin/migrations.js run`
+  - Result: Successfully applied 1758705774125, 1758705789125, 1758705804128. `kysely_migrations` now has 39 rows in correct order.
+- Follow-up: Start server normally; ensure `DB_SKIP_MIGRATIONS` is not set; verify logs show migrations completed without errors.
+
+2025-11-03 — Finalize order via timestamp correction
+
+- Symptom (post-run): Server still reported out-of-order at index 35.
+- Root cause: Kysely orders executed migrations by the `timestamp` string; the 3 OCR entries had timestamps later than `1761078763279-AddAppVersionColumnToSession`.
+- Action: Updated timestamps to predate 176107… while remaining after prior entries:
+  - `1758705774125-CreateAssetOCRTable` → `2025-10-20T00:00:00.000Z`
+  - `1758705789125-CreateOCRSearchTable` → `2025-10-20T00:00:01.000Z`
+  - `1758705804128-UpsertOcrAssetJobStatus` → `2025-10-20T00:00:02.000Z`
+- Result: `kysely_migrations` now aligns with file order (39 rows); server should start cleanly.
+
 2025-11-03 — Fix prod Docker build (lockfile mismatch)
 
 - Symptom: `docker compose -f docker/docker-compose.prod.yml build` fails in `immich-server` stage with `ERR_PNPM_OUTDATED_LOCKFILE` because `pnpm-lock.yaml` didn’t include newly added `server` deps (`@aws-sdk/client-s3`, `@aws-sdk/lib-storage`).
