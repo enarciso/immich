@@ -103,15 +103,19 @@ export class MediaService extends BaseService {
     return { localPath: tmp, cleanup: () => fs.rm(tmp, { force: true }).then(() => {}) };
   }
 
-  private async stageOutputIfS3(destPath: string): Promise<{ localPath: string; finalize: () => Promise<void> }> {
+  private async stageOutputIfS3(
+    destPath: string,
+  ): Promise<{ localPath: string; finalize: () => Promise<void>; cleanup: () => Promise<void> }> {
     if (!this.isS3Path(destPath)) {
-      return { localPath: destPath, finalize: async () => {} };
+      return { localPath: destPath, finalize: async () => {}, cleanup: async () => {} };
     }
     const s3 = this.getS3()!;
     const ext = destPath.split('.').pop() || 'tmp';
     const tmpBase = StorageCore.getTempPathInDir(os.tmpdir());
     const tmp = tmpBase.replace(/\.tmp$/, `.${ext}`);
     await fs.mkdir(tmp.substring(0, tmp.lastIndexOf('/')), { recursive: true }).catch(() => {});
+    const removeTempFile = () => fs.rm(tmp, { force: true });
+
     return {
       localPath: tmp,
       finalize: async () => {
@@ -122,8 +126,11 @@ export class MediaService extends BaseService {
           this.logger.error('Failed to upload to S3', { path: destPath, error: error?.message || error });
           throw error;
         } finally {
-          await fs.rm(tmp, { force: true });
+          await removeTempFile();
         }
+      },
+      cleanup: async () => {
+        await removeTempFile();
       },
     };
   }
@@ -611,82 +618,99 @@ export class MediaService extends BaseService {
     const output = StorageCore.getEncodedVideoPath(asset);
     this.storageCore.ensureFolders(output);
     const stagedIn = await this.stageInputIfS3(input);
-    const stagedOut = await this.stageOutputIfS3(output);
-
-    const { videoStreams, audioStreams, format } = await this.mediaRepository.probe(stagedIn.localPath, {
-      countFrames: this.logger.isLevelEnabled(LogLevel.Debug), // makes frame count more reliable for progress logs
-    });
-    const videoStream = this.getMainStream(videoStreams);
-    const audioStream = this.getMainStream(audioStreams);
-    if (!videoStream || !format.formatName) {
-      return JobStatus.Failed;
-    }
-
-    if (!videoStream.height || !videoStream.width) {
-      this.logger.warn(`Skipped transcoding for asset ${asset.id}: no video streams found`);
-      return JobStatus.Failed;
-    }
-
-    let { ffmpeg } = await this.getConfig({ withCache: true });
-    const target = this.getTranscodeTarget(ffmpeg, videoStream, audioStream);
-    if (target === TranscodeTarget.None && !this.isRemuxRequired(ffmpeg, format)) {
-      if (asset.encodedVideoPath) {
-        this.logger.log(`Transcoded video exists for asset ${asset.id}, but is no longer required. Deleting...`);
-        await this.jobRepository.queue({ name: JobName.FileDelete, data: { files: [asset.encodedVideoPath] } });
-        await this.assetRepository.update({ id: asset.id, encodedVideoPath: null });
-      } else {
-        this.logger.verbose(`Asset ${asset.id} does not require transcoding based on current policy, skipping`);
-      }
-
-      return JobStatus.Skipped;
-    }
-
-    const command = BaseConfig.create(ffmpeg, this.videoInterfaces).getCommand(target, videoStream, audioStream);
-    if (ffmpeg.accel === TranscodeHardwareAcceleration.Disabled) {
-      this.logger.log(`Transcoding video ${asset.id} without hardware acceleration`);
-    } else {
-      this.logger.log(
-        `Transcoding video ${asset.id} with ${ffmpeg.accel.toUpperCase()}-accelerated encoding and${ffmpeg.accelDecode ? '' : ' software'} decoding`,
-      );
-    }
+    let stagedOut: Awaited<ReturnType<MediaService['stageOutputIfS3']>> | null = null;
 
     try {
-      await this.mediaRepository.transcode(stagedIn.localPath, stagedOut.localPath, command);
-      await Promise.all([stagedOut.finalize(), stagedIn.cleanup()]);
-    } catch (error: any) {
-      this.logger.error(`Error occurred during transcoding: ${error.message}`);
-      if (ffmpeg.accel === TranscodeHardwareAcceleration.Disabled) {
+      const { videoStreams, audioStreams, format } = await this.mediaRepository.probe(stagedIn.localPath, {
+        countFrames: this.logger.isLevelEnabled(LogLevel.Debug), // makes frame count more reliable for progress logs
+      });
+      const videoStream = this.getMainStream(videoStreams);
+      const audioStream = this.getMainStream(audioStreams);
+      if (!videoStream || !format.formatName) {
         return JobStatus.Failed;
       }
 
-      let partialFallbackSuccess = false;
-      if (ffmpeg.accelDecode) {
-        try {
-          this.logger.error(`Retrying with ${ffmpeg.accel.toUpperCase()}-accelerated encoding and software decoding`);
-          ffmpeg = { ...ffmpeg, accelDecode: false };
-          const command = BaseConfig.create(ffmpeg, this.videoInterfaces).getCommand(target, videoStream, audioStream);
-          await this.mediaRepository.transcode(stagedIn.localPath, stagedOut.localPath, command);
-          await Promise.all([stagedOut.finalize(), stagedIn.cleanup()]);
-          partialFallbackSuccess = true;
-        } catch (error: any) {
-          this.logger.error(`Error occurred during transcoding: ${error.message}`);
+      if (!videoStream.height || !videoStream.width) {
+        this.logger.warn(`Skipped transcoding for asset ${asset.id}: no video streams found`);
+        return JobStatus.Failed;
+      }
+
+      let { ffmpeg } = await this.getConfig({ withCache: true });
+      const target = this.getTranscodeTarget(ffmpeg, videoStream, audioStream);
+      if (target === TranscodeTarget.None && !this.isRemuxRequired(ffmpeg, format)) {
+        if (asset.encodedVideoPath) {
+          this.logger.log(`Transcoded video exists for asset ${asset.id}, but is no longer required. Deleting...`);
+          await this.jobRepository.queue({ name: JobName.FileDelete, data: { files: [asset.encodedVideoPath] } });
+          await this.assetRepository.update({ id: asset.id, encodedVideoPath: null });
+        } else {
+          this.logger.verbose(`Asset ${asset.id} does not require transcoding based on current policy, skipping`);
+        }
+
+        return JobStatus.Skipped;
+      }
+
+      stagedOut = await this.stageOutputIfS3(output);
+
+      const buildCommand = (config: SystemConfigFFmpegDto) =>
+        BaseConfig.create(config, this.videoInterfaces).getCommand(target, videoStream, audioStream);
+      const transcodeToOutput = async (command: ReturnType<typeof buildCommand>) => {
+        await this.mediaRepository.transcode(stagedIn.localPath, stagedOut!.localPath, command);
+        await stagedOut!.finalize();
+      };
+
+      if (ffmpeg.accel === TranscodeHardwareAcceleration.Disabled) {
+        this.logger.log(`Transcoding video ${asset.id} without hardware acceleration`);
+      } else {
+        this.logger.log(
+          `Transcoding video ${asset.id} with ${ffmpeg.accel.toUpperCase()}-accelerated encoding and${ffmpeg.accelDecode ? '' : ' software'} decoding`,
+        );
+      }
+
+      let transcodeComplete = false;
+      const initialCommand = buildCommand(ffmpeg);
+      try {
+        await transcodeToOutput(initialCommand);
+        transcodeComplete = true;
+      } catch (error: any) {
+        this.logger.error(`Error occurred during transcoding: ${error.message}`);
+        if (ffmpeg.accel === TranscodeHardwareAcceleration.Disabled) {
+          return JobStatus.Failed;
+        }
+
+        if (ffmpeg.accelDecode) {
+          try {
+            this.logger.error(`Retrying with ${ffmpeg.accel.toUpperCase()}-accelerated encoding and software decoding`);
+            const decodeFallback = { ...ffmpeg, accelDecode: false };
+            const decodeCommand = buildCommand(decodeFallback);
+            await transcodeToOutput(decodeCommand);
+            ffmpeg = decodeFallback;
+            transcodeComplete = true;
+          } catch (decodeError: any) {
+            this.logger.error(`Error occurred during transcoding: ${decodeError.message}`);
+          }
+        }
+
+        if (!transcodeComplete) {
+          this.logger.error(`Retrying with ${ffmpeg.accel.toUpperCase()} acceleration disabled`);
+          const cpuFallback = { ...ffmpeg, accel: TranscodeHardwareAcceleration.Disabled };
+          const cpuCommand = buildCommand(cpuFallback);
+          await transcodeToOutput(cpuCommand);
+          ffmpeg = cpuFallback;
+          transcodeComplete = true;
         }
       }
 
-      if (!partialFallbackSuccess) {
-        this.logger.error(`Retrying with ${ffmpeg.accel.toUpperCase()} acceleration disabled`);
-        ffmpeg = { ...ffmpeg, accel: TranscodeHardwareAcceleration.Disabled };
-        const command = BaseConfig.create(ffmpeg, this.videoInterfaces).getCommand(target, videoStream, audioStream);
-        await this.mediaRepository.transcode(stagedIn.localPath, stagedOut.localPath, command);
-        await Promise.all([stagedOut.finalize(), stagedIn.cleanup()]);
+      this.logger.log(`Successfully encoded ${asset.id}`);
+
+      await this.assetRepository.update({ id: asset.id, encodedVideoPath: output });
+
+      return JobStatus.Success;
+    } finally {
+      await stagedIn.cleanup();
+      if (stagedOut) {
+        await stagedOut.cleanup();
       }
     }
-
-    this.logger.log(`Successfully encoded ${asset.id}`);
-
-    await this.assetRepository.update({ id: asset.id, encodedVideoPath: output });
-
-    return JobStatus.Success;
   }
 
   private getMainStream<T extends VideoStreamInfo | AudioStreamInfo>(streams: T[]): T {

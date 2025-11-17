@@ -133,3 +133,19 @@ Open Questions / TODOs
 - Root cause: Node default heap (~2GB) too low for SSR + client builds inside constrained builder image.
 - Change: set `NODE_OPTIONS=--max-old-space-size=4096` for the web build RUN step in `server/Dockerfile`.
 - Validation: should allow the web build stage to complete without OOM; no runtime impact since it’s only applied during the build step.
+
+## 2025-11-17 — Repository orientation + guideline refresh
+- Reviewed workspace layout (pnpm workspace, Makefile, mise.toml, server/web/cli/mobile/ml/e2e/docs packages) to reconfirm structure, tooling versions, and workflows.
+- Rewrote `AGENTS.md` with a detailed playbook covering principles, tooling, package patterns, workflows, testing matrix, generated assets, and safety/process expectations.
+- Rebuilt `codex.md` to capture the day-to-day operating rhythm, plan/tool usage, command references, validation rules, and communication style.
+- Commands: `ls`, `cat pnpm-workspace.yaml`, `cat package.json`, `sed -n` for README/Makefile/continue/mise, directory listings for each package (`ls server/src` etc.), and `mv` to replace AGENTS/codex after drafting.
+- Next: Ready for feature/bugfix work; follow the new playbook + codex for subsequent contributions.
+
+2025-11-17 — Clean up S3 staging files after video transcode
+- Issue: S3 staging for video transcode jobs left /tmp artifacts (especially when jobs were skipped or failed) which exhausted pod disks.
+- Changes: updated `MediaService.stageOutputIfS3` to return a `cleanup` handler and ensured `handleVideoConversion` always runs staged input/output cleanup in `finally` and only allocates staged output when needed. Reworked transcode flow so invalid HW configs still throw (matching existing tests) while runtime ffmpeg errors fall back to software decoding/CPU, and staged files are purged even on early returns.
+- Commands:
+  - `sudo npm install -g pnpm@10.19.0` (pnpm missing in PATH)
+  - `cd server && ./node_modules/.bin/vitest --config test/vitest.config.mjs --run` (timed out due to suite size)
+  - `cd server && ./node_modules/.bin/vitest run --config test/vitest.config.mjs src/services/media.service.spec.ts`
+- Result: targeted media service tests pass; temporary staging files are removed after each job regardless of success/failure/skip. Ready for deployment once broader validation (if desired) completes.
