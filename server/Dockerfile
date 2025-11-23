@@ -53,11 +53,28 @@ FROM builder AS plugins
 COPY --from=ghcr.io/jdx/mise:2025.11.3@sha256:ac26f5978c0e2783f3e68e58ce75eddb83e41b89bf8747c503bac2aa9baf22c5 /usr/local/bin/mise /usr/local/bin/mise
 
 WORKDIR /usr/src/app
+ARG EXTISM_JS_VERSION=1.5.1
 COPY ./plugins/mise.toml ./plugins/
 ENV MISE_TRUSTED_CONFIG_PATHS=/usr/src/app/plugins/mise.toml
 ENV MISE_DATA_DIR=/buildcache/mise
+ENV PATH="/buildcache/mise/shims:${PATH}"
 RUN --mount=type=cache,id=mise-tools,target=/buildcache/mise \
   mise install --cd plugins
+
+# Install extism-js compiler (not published to npm)
+RUN set -euo pipefail; \
+  apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*; \
+  arch="$(uname -m)"; \
+  case "$arch" in \
+    x86_64|amd64) ext_arch="x86_64" ;; \
+    aarch64|arm64) ext_arch="aarch64" ;; \
+    *) echo "Unsupported architecture: $arch" >&2; exit 1 ;; \
+  esac; \
+  url="https://github.com/extism/js-pdk/releases/download/v${EXTISM_JS_VERSION}/extism-js-${ext_arch}-linux-v${EXTISM_JS_VERSION}.gz"; \
+  curl -fsSL "$url" -o /tmp/extism-js.gz; \
+  gunzip /tmp/extism-js.gz; \
+  install -m 0755 /tmp/extism-js /usr/local/bin/extism-js; \
+  rm -f /tmp/extism-js
 
 COPY ./plugins ./plugins/
 # Build plugins

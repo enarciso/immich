@@ -3,16 +3,30 @@ on:
   release:
     types:
       - released
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch or tag to build'
+        required: true
+        default: main
+      image_tag:
+        description: 'Image tag to push (defaults to ref if empty)'
+        required: false
 
 jobs:
   build-image:
     runs-on: ubuntu-latest
+    env:
+      REF: ${{ github.event.inputs.ref || github.event.release.tag_name || github.ref_name }}
+      IMAGE_TAG: ${{ github.event.release.tag_name || github.event.inputs.image_tag || github.event.inputs.ref || github.ref_name }}
 
     steps:
       # Mandatory checkout action
       - name: Checkout
         id: checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.REF }}
 
       # Docker Hub Log In
       - name: Login to Docker Hub
@@ -34,7 +48,7 @@ jobs:
           if [ -f ./server/Dockerfile ]; then
             docker buildx build --platform=linux/arm64,linux/amd64 \
             -t enarciso/immich-server:latest \
-            -t enarciso/immich-server:${{ github.event.release.tag_name }} \
+            -t enarciso/immich-server:${IMAGE_TAG} \
             --push \
             -f ./server/Dockerfile .
           else
@@ -49,7 +63,7 @@ jobs:
           if [ -f ./machine-learning/Dockerfile ]; then
             docker buildx build --platform=linux/arm64,linux/amd64 \
             -t enarciso/immich-machine-learning:latest \
-            -t enarciso/immich-machine-learning:${{ github.event.release.tag_name }} \
+            -t enarciso/immich-machine-learning:${IMAGE_TAG} \
             --push \
             -f ./machine-learning/Dockerfile ./machine-learning/
           else

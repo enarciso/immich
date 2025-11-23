@@ -160,3 +160,24 @@ Open Questions / TODOs
 - Regenerated workspace `pnpm-lock.yaml` after it was removed to resolve conflicts.
 - Commands: `sudo npm install -g pnpm@10.20.0` (pnpm missing), `pnpm -r --filter '!documentation' install --lockfile-only` (ran under Node v18.19.1 in this shell; produced engine warnings but completed). Lockfile now present for all workspaces.
 - Next: Use Node 24.11.0 via mise/Volta for builds/tests; proceed with image build using the refreshed lockfile.
+
+2025-11-23 — Fix plugin build path for extism-js
+- Docker multi-arch build failed in plugins stage (`extism-js: not found`). Added `PATH=/buildcache/mise/shims:$PATH` in `server/Dockerfile` plugins stage so mise-installed shims are available during `mise run build`.
+- Re-ran lockfile generation after reverting the temporary extism-js npm dependency: `pnpm -r --filter '!documentation' install --lockfile-only` (Node v18.19.1; engine warnings expected).
+- Next: Retry docker build; mise-installed extism-js should now be on PATH for all architectures.
+
+2025-11-23 — Invoke extism-js via mise and refresh lockfile
+- Updated `plugins/package.json` to call `extism-js` through `mise x extism/js-pdk@1.5.1` so the binary is resolved from mise installs during builds (avoids missing binary in Docker multi-arch).
+- Regenerated `pnpm-lock.yaml` after the script change with `pnpm -r --filter '!documentation' install --lockfile-only` (Node v18.19.1; engine warnings expected).
+- Next: Run the docker build again; plugins stage should now find `extism-js` via mise.
+
+2025-11-23 — Download extism-js binary in Docker build
+- Changed plugin wasm build to call `extism-js` directly again (`plugins/package.json`).
+- In the plugins stage of `server/Dockerfile`, added an `ARG EXTISM_JS_VERSION` and a download step that fetches the appropriate `extism-js` binary for x86_64/aarch64 from the official js-pdk release and installs it to `/usr/local/bin`. PATH already includes `/buildcache/mise/shims` for binaryen.
+- Regenerated `pnpm-lock.yaml` after the script adjustment with `pnpm -r --filter '!documentation' install --lockfile-only` (Node v18.19.1; engine warnings expected).
+- Next: Retry the docker build; the plugins stage should now find `extism-js` without relying on mise plugins.
+
+2025-11-24 — Reapply extism-js download after revert
+- User reset Dockerfile; re-added minimal plugin-stage fix to download `extism-js` binary for x86_64/aarch64 and ensure `/buildcache/mise/shims` is on PATH so binaryen/mise tools are found.
+- No lockfile changes.
+- Next: rerun multi-arch `docker buildx`; plugin build should locate `extism-js`.

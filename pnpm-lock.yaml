@@ -4998,6 +4998,9 @@ packages:
   '@types/node@20.19.24':
     resolution: {integrity: sha512-FE5u0ezmi6y9OZEzlJfg37mqqf6ZDSF2V/NLjUyGrR9uTZ7Sb9F7bLNZ03S4XVUNRWGA7Ck4c1kK+YnuWjl+DA==}
 
+  '@types/node@22.18.13':
+    resolution: {integrity: sha512-Bo45YKIjnmFtv6I1TuC8AaHBbqXtIo+Om5fE4QiU1Tj8QR/qt+8O3BAtOimG5IFmwaWiPmB3Mv3jtYzBA4Us2A==}
+
   '@types/node@22.19.1':
     resolution: {integrity: sha512-LCCV0HdSZZZb34qifBsyWlUmok6W7ouER+oQIGBScS8EsZsQbrtFTUrDX4hOl+CS6p7cnNC4td+qrSVGSCTUfQ==}
 
@@ -15383,7 +15386,7 @@ snapshots:
       '@jest/schemas': 29.6.3
       '@types/istanbul-lib-coverage': 2.0.6
       '@types/istanbul-reports': 3.0.4
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
       '@types/yargs': 17.0.34
       chalk: 4.1.2
 
@@ -17336,7 +17339,7 @@ snapshots:
 
   '@types/accepts@1.3.7':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/archiver@6.0.4':
     dependencies:
@@ -17348,16 +17351,16 @@ snapshots:
 
   '@types/bcrypt@6.0.0':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/body-parser@1.19.6':
     dependencies:
       '@types/connect': 3.4.38
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/bonjour@3.5.13':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/braces@3.0.5': {}
 
@@ -17378,21 +17381,21 @@ snapshots:
 
   '@types/cli-progress@3.11.6':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/compression@1.8.1':
     dependencies:
       '@types/express': 5.0.5
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/connect-history-api-fallback@1.5.4':
     dependencies:
       '@types/express-serve-static-core': 5.1.0
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/connect@3.4.38':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/content-disposition@0.5.9': {}
 
@@ -17409,11 +17412,11 @@ snapshots:
       '@types/connect': 3.4.38
       '@types/express': 5.0.5
       '@types/keygrip': 1.0.6
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/cors@2.8.19':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/debug@4.1.12':
     dependencies:
@@ -17423,13 +17426,13 @@ snapshots:
 
   '@types/docker-modem@3.0.6':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
       '@types/ssh2': 1.15.5
 
   '@types/dockerode@3.3.45':
     dependencies:
       '@types/docker-modem': 3.0.6
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
       '@types/ssh2': 1.15.5
 
   '@types/dom-to-image@2.6.7': {}
@@ -17452,14 +17455,14 @@ snapshots:
 
   '@types/express-serve-static-core@4.19.7':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
       '@types/qs': 6.14.0
       '@types/range-parser': 1.2.7
       '@types/send': 1.2.1
 
   '@types/express-serve-static-core@5.1.0':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
       '@types/qs': 6.14.0
       '@types/range-parser': 1.2.7
       '@types/send': 1.2.1
@@ -17485,7 +17488,7 @@ snapshots:
 
   '@types/fluent-ffmpeg@2.1.28':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/geojson-vt@3.2.5':
     dependencies:
@@ -17517,7 +17520,7 @@ snapshots:
 
   '@types/http-proxy@1.17.17':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/inquirer@8.2.11':
     dependencies:
@@ -17560,7 +17563,7 @@ snapshots:
       '@types/http-errors': 2.0.5
       '@types/keygrip': 1.0.6
       '@types/koa-compose': 3.2.8
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/leaflet@1.9.21':
     dependencies:
@@ -17590,7 +17593,7 @@ snapshots:
 
   '@types/mock-fs@4.13.4':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/ms@2.1.0': {}
 
@@ -17600,7 +17603,7 @@ snapshots:
 
   '@types/node-forge@1.3.14':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/node@17.0.45': {}
 
@@ -17609,6 +17612,10 @@ snapshots:
       undici-types: 5.26.5
 
   '@types/node@20.19.24':
+    dependencies:
+      undici-types: 6.21.0
+
+  '@types/node@22.18.13':
     dependencies:
       undici-types: 6.21.0
 
@@ -17624,7 +17631,7 @@ snapshots:
   '@types/nodemailer@7.0.3':
     dependencies:
       '@aws-sdk/client-sesv2': 3.919.0
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
     transitivePeerDependencies:
       - aws-crt
 
@@ -17632,7 +17639,7 @@ snapshots:
     dependencies:
       '@types/keygrip': 1.0.6
       '@types/koa': 3.0.0
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/parse5@5.0.3': {}
 
@@ -17642,7 +17649,7 @@ snapshots:
 
   '@types/pg@8.15.5':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
       pg-protocol: 1.10.3
       pg-types: 2.2.0
 
@@ -17650,13 +17657,13 @@ snapshots:
 
   '@types/pngjs@6.0.5':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/prismjs@1.26.5': {}
 
   '@types/qrcode@1.5.6':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/qs@6.14.0': {}
 
@@ -17685,7 +17692,7 @@ snapshots:
 
   '@types/readdir-glob@1.1.5':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/retry@0.12.2': {}
 
@@ -17695,18 +17702,18 @@ snapshots:
 
   '@types/sax@1.2.7':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/semver@7.7.1': {}
 
   '@types/send@0.17.6':
     dependencies:
       '@types/mime': 1.3.5
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/send@1.2.1':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/serve-index@1.9.4':
     dependencies:
@@ -17715,20 +17722,20 @@ snapshots:
   '@types/serve-static@1.15.10':
     dependencies:
       '@types/http-errors': 2.0.5
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
       '@types/send': 0.17.6
 
   '@types/sockjs@0.3.36':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/ssh2-streams@0.1.13':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/ssh2@0.5.52':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
       '@types/ssh2-streams': 0.1.13
 
   '@types/ssh2@1.15.5':
@@ -17739,7 +17746,7 @@ snapshots:
     dependencies:
       '@types/cookiejar': 2.1.5
       '@types/methods': 1.1.4
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
       form-data: 4.0.4
 
   '@types/supercluster@7.1.3':
@@ -17767,7 +17774,7 @@ snapshots:
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
 
   '@types/yargs-parser@21.0.3': {}
 
@@ -19600,7 +19607,7 @@ snapshots:
   engine.io@6.6.4:
     dependencies:
       '@types/cors': 2.8.19
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
       accepts: 1.3.8
       base64id: 2.0.0
       cookie: 0.7.2
@@ -20066,7 +20073,7 @@ snapshots:
 
   eval@0.1.8:
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
       require-like: 0.1.2
 
   event-emitter@0.3.5:
@@ -21271,7 +21278,7 @@ snapshots:
   jest-util@29.7.0:
     dependencies:
       '@jest/types': 29.6.3
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
       chalk: 4.1.2
       ci-info: 3.9.0
       graceful-fs: 4.2.11
@@ -21279,13 +21286,13 @@ snapshots:
 
   jest-worker@27.5.1:
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
       merge-stream: 2.0.0
       supports-color: 8.1.1
 
   jest-worker@29.7.0:
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
       jest-util: 29.7.0
       merge-stream: 2.0.0
       supports-color: 8.1.1
@@ -23650,7 +23657,7 @@ snapshots:
       '@protobufjs/path': 1.1.2
       '@protobufjs/pool': 1.1.0
       '@protobufjs/utf8': 1.1.0
-      '@types/node': 22.19.1
+      '@types/node': 22.18.13
       long: 5.3.2
 
   protocol-buffers-schema@3.6.0: {}
