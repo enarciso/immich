@@ -145,7 +145,18 @@ Open Questions / TODOs
 - Issue: S3 staging for video transcode jobs left /tmp artifacts (especially when jobs were skipped or failed) which exhausted pod disks.
 - Changes: updated `MediaService.stageOutputIfS3` to return a `cleanup` handler and ensured `handleVideoConversion` always runs staged input/output cleanup in `finally` and only allocates staged output when needed. Reworked transcode flow so invalid HW configs still throw (matching existing tests) while runtime ffmpeg errors fall back to software decoding/CPU, and staged files are purged even on early returns.
 - Commands:
-  - `sudo npm install -g pnpm@10.19.0` (pnpm missing in PATH)
-  - `cd server && ./node_modules/.bin/vitest --config test/vitest.config.mjs --run` (timed out due to suite size)
+ - `sudo npm install -g pnpm@10.19.0` (pnpm missing in PATH)
+ - `cd server && ./node_modules/.bin/vitest --config test/vitest.config.mjs --run` (timed out due to suite size)
   - `cd server && ./node_modules/.bin/vitest run --config test/vitest.config.mjs src/services/media.service.spec.ts`
 - Result: targeted media service tests pass; temporary staging files are removed after each job regardless of success/failure/skip. Ready for deployment once broader validation (if desired) completes.
+
+2025-11-22 — Refresh AGENTS/codex after repo survey
+- Re-surveyed the monorepo layout, workspace config, package manifests, and tooling versions (pnpm 10.20.0, Node 24.11.0) to ensure guidance matches current state, including the `plugins/` workspace.
+- Rewrote `AGENTS.md` and `codex.md` to emphasize pattern alignment, package-specific workflows, validation expectations, generated assets, and safety/process rules.
+- Commands: `pwd`, `ls`, `cat continue.md`, `cat AGENTS.md`, `cat codex.md`, `cat pnpm-workspace.yaml`, `cat package.json`, `cat server/package.json`, `cat web/package.json`, `cat cli/package.json`, `cat open-api/typescript-sdk/package.json`, `cat e2e/package.json`, `cat docs/package.json`, `sed -n '1,200p' machine-learning/pyproject.toml`, `sed -n '1,120p' mobile/pubspec.yaml`, `sed -n '1,200p' Makefile`, `ls server/src`, `ls web/src`, `ls cli/src`, `ls plugins`, `cat plugins/package.json`, `date`.
+- Next: Ready to pick up feature/bugfix work using the refreshed playbook.
+
+2025-11-22 — Regenerate pnpm lockfile
+- Regenerated workspace `pnpm-lock.yaml` after it was removed to resolve conflicts.
+- Commands: `sudo npm install -g pnpm@10.20.0` (pnpm missing), `pnpm -r --filter '!documentation' install --lockfile-only` (ran under Node v18.19.1 in this shell; produced engine warnings but completed). Lockfile now present for all workspaces.
+- Next: Use Node 24.11.0 via mise/Volta for builds/tests; proceed with image build using the refreshed lockfile.
