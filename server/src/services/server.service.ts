@@ -144,6 +144,7 @@ export class ServerService extends BaseService {
       publicUsers: config.server.publicUsers,
       mapDarkStyleUrl: config.map.darkStyle,
       mapLightStyleUrl: config.map.lightStyle,
+      maintenanceMode: false,
     };
   }
 
