@@ -39,7 +39,7 @@ jobs:
       - name: Free space before build
         run: |
           docker system prune -af --volumes || true
-          docker builder prune -af --volumes || true
+          docker builder prune -af || true
 
       # Set up Docker Buildx
       - name: Set up Docker Buildx
