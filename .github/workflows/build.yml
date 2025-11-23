@@ -36,6 +36,11 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Free space before build
+        run: |
+          docker system prune -af || true
+          docker builder prune -af || true
+
       # Set up Docker Buildx
       - name: Set up Docker Buildx
         id: docker-buildx
@@ -70,3 +75,9 @@ jobs:
             echo "Dockerfile is not found"
             exit 1
           fi
+
+      - name: Cleanup after build
+        if: always()
+        run: |
+          docker system prune -af || true
+          docker builder prune -af || true
