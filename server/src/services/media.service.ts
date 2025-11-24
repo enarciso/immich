@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import { createReadStream, createWriteStream } from 'node:fs';
+import { extname } from 'node:path';
 import os from 'node:os';
 import { pipeline } from 'node:stream/promises';
 import { Injectable } from '@nestjs/common';
@@ -783,7 +784,9 @@ export class MediaService extends BaseService {
       return { localPath: path, commit: async () => {}, cleanup: async () => {} };
     }
     const s3 = this.getS3()!;
-    const tmp = StorageCore.getTempPathInDir(os.tmpdir());
+    const ext = extname(path);
+    const tmpBase = StorageCore.getTempPathInDir(os.tmpdir());
+    const tmp = ext ? `${tmpBase}${ext}` : tmpBase;
     await fs.mkdir(tmp.substring(0, tmp.lastIndexOf('/')), { recursive: true }).catch(() => {});
     const commit = async () => {
       const { stream, done } = await s3.writeStream(path);

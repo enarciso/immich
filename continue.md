@@ -192,3 +192,4 @@ Open Questions / TODOs
 
 2025-11-24 — Stage S3 outputs locally before upload
 - `server/src/services/media.service.ts`: added `stageOutputIfS3` to write ffmpeg outputs to a temp file when the target is S3, upload via the S3 backend, and clean up afterward. Applied to video thumbnail generation and video conversion so ffmpeg never writes directly to `s3://`, preventing protocol errors and tmp bloat.
+- Adjusted temp output naming to carry the original file extension so ffmpeg can infer the muxer when writing staged outputs.
