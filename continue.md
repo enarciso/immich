@@ -181,3 +181,11 @@ Open Questions / TODOs
 - User reset Dockerfile; re-added minimal plugin-stage fix to download `extism-js` binary for x86_64/aarch64 and ensure `/buildcache/mise/shims` is on PATH so binaryen/mise tools are found.
 - No lockfile changes.
 - Next: rerun multi-arch `docker buildx`; plugin build should locate `extism-js`.
+
+2025-11-24 — Stage S3 media locally for ffprobe/ffmpeg
+- `server/src/services/media.service.ts`: added S3-aware staging helpers and now stage inputs for video thumbnail generation and video conversion so ffprobe/ffmpeg always read local temp files. Cleans up staged files afterward. Fixes “Protocol not found” when originals are on S3.
+- Adjusted S3 config lookup to use env storage config (removed bad `getStorageTemplate` call).
+- Build-time TypeScript error resolved; rerun server image build.
+
+2025-11-24 — Ensure staged video inputs are always cleaned
+- `server/src/services/media.service.ts`: wrapped video transcoding path in try/finally to guarantee staged temp files are removed even on errors/early returns. (Also added staging cleanup around video thumbnail generation.)
