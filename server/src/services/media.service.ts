@@ -1,5 +1,5 @@
 import { promises as fs } from 'node:fs';
-import { createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import os from 'node:os';
 import { pipeline } from 'node:stream/promises';
 import { Injectable } from '@nestjs/common';
@@ -431,30 +431,35 @@ export class MediaService extends BaseService {
     const { image, ffmpeg } = await this.getConfig({ withCache: true });
     const previewPath = StorageCore.getImagePath(asset, AssetPathType.Preview, image.preview.format);
     const thumbnailPath = StorageCore.getImagePath(asset, AssetPathType.Thumbnail, image.thumbnail.format);
-    this.storageCore.ensureFolders(previewPath);
+    const previewOutput = await this.stageOutputIfS3(previewPath);
+    const thumbnailOutput = await this.stageOutputIfS3(thumbnailPath);
 
     const staged = await this.stageInputIfS3(asset.originalPath);
-    const { format, audioStreams, videoStreams } = await this.mediaRepository.probe(staged.localPath);
-    const mainVideoStream = this.getMainStream(videoStreams);
-    if (!mainVideoStream) {
-      await staged.cleanup();
-      throw new Error(`No video streams found for asset ${asset.id}`);
+    try {
+      const { format, audioStreams, videoStreams } = await this.mediaRepository.probe(staged.localPath);
+      const mainVideoStream = this.getMainStream(videoStreams);
+      if (!mainVideoStream) {
+        throw new Error(`No video streams found for asset ${asset.id}`);
+      }
+      const mainAudioStream = this.getMainStream(audioStreams);
+
+      const previewConfig = ThumbnailConfig.create({ ...ffmpeg, targetResolution: image.preview.size.toString() });
+      const thumbnailConfig = ThumbnailConfig.create({ ...ffmpeg, targetResolution: image.thumbnail.size.toString() });
+      const previewOptions = previewConfig.getCommand(TranscodeTarget.Video, mainVideoStream, mainAudioStream, format);
+      const thumbnailOptions = thumbnailConfig.getCommand(
+        TranscodeTarget.Video,
+        mainVideoStream,
+        mainAudioStream,
+        format,
+      );
+
+      await this.mediaRepository.transcode(staged.localPath, previewOutput.localPath, previewOptions);
+      await previewOutput.commit();
+      await this.mediaRepository.transcode(staged.localPath, thumbnailOutput.localPath, thumbnailOptions);
+      await thumbnailOutput.commit();
+    } finally {
+      await Promise.all([staged.cleanup(), previewOutput.cleanup(), thumbnailOutput.cleanup()]);
     }
-    const mainAudioStream = this.getMainStream(audioStreams);
-
-    const previewConfig = ThumbnailConfig.create({ ...ffmpeg, targetResolution: image.preview.size.toString() });
-    const thumbnailConfig = ThumbnailConfig.create({ ...ffmpeg, targetResolution: image.thumbnail.size.toString() });
-    const previewOptions = previewConfig.getCommand(TranscodeTarget.Video, mainVideoStream, mainAudioStream, format);
-    const thumbnailOptions = thumbnailConfig.getCommand(
-      TranscodeTarget.Video,
-      mainVideoStream,
-      mainAudioStream,
-      format,
-    );
-
-    await this.mediaRepository.transcode(staged.localPath, previewPath, previewOptions);
-    await this.mediaRepository.transcode(staged.localPath, thumbnailPath, thumbnailOptions);
-    await staged.cleanup();
 
     const thumbhash = await this.mediaRepository.generateThumbhash(previewPath, {
       colorspace: image.colorspace,
@@ -492,9 +497,10 @@ export class MediaService extends BaseService {
 
     const staged = await this.stageInputIfS3(asset.originalPath);
     const input = staged.localPath;
+    const outputTarget = StorageCore.getEncodedVideoPath(asset);
+    const output = await this.stageOutputIfS3(outputTarget);
     try {
-      const output = StorageCore.getEncodedVideoPath(asset);
-      this.storageCore.ensureFolders(output);
+      this.storageCore.ensureFolders(output.localPath);
 
       const { videoStreams, audioStreams, format } = await this.mediaRepository.probe(input, {
         countFrames: this.logger.isLevelEnabled(LogLevel.Debug), // makes frame count more reliable for progress logs
@@ -534,7 +540,7 @@ export class MediaService extends BaseService {
       }
 
       try {
-        await this.mediaRepository.transcode(input, output, command);
+        await this.mediaRepository.transcode(input, output.localPath, command);
       } catch (error: any) {
         this.logger.error(`Error occurred during transcoding: ${error.message}`);
         if (ffmpeg.accel === TranscodeHardwareAcceleration.Disabled) {
@@ -546,29 +552,30 @@ export class MediaService extends BaseService {
           try {
             this.logger.error(`Retrying with ${ffmpeg.accel.toUpperCase()}-accelerated encoding and software decoding`);
             ffmpeg = { ...ffmpeg, accelDecode: false };
-            const command = BaseConfig.create(ffmpeg, this.videoInterfaces).getCommand(target, videoStream, audioStream);
-            await this.mediaRepository.transcode(input, output, command);
-            partialFallbackSuccess = true;
-          } catch (error: any) {
-            this.logger.error(`Error occurred during transcoding: ${error.message}`);
-          }
+          const command = BaseConfig.create(ffmpeg, this.videoInterfaces).getCommand(target, videoStream, audioStream);
+          await this.mediaRepository.transcode(input, output.localPath, command);
+          partialFallbackSuccess = true;
+        } catch (error: any) {
+          this.logger.error(`Error occurred during transcoding: ${error.message}`);
         }
+      }
 
         if (!partialFallbackSuccess) {
           this.logger.error(`Retrying with ${ffmpeg.accel.toUpperCase()} acceleration disabled`);
           ffmpeg = { ...ffmpeg, accel: TranscodeHardwareAcceleration.Disabled };
           const command = BaseConfig.create(ffmpeg, this.videoInterfaces).getCommand(target, videoStream, audioStream);
-          await this.mediaRepository.transcode(input, output, command);
+          await this.mediaRepository.transcode(input, output.localPath, command);
         }
       }
 
       this.logger.log(`Successfully encoded ${asset.id}`);
 
-      await this.assetRepository.update({ id: asset.id, encodedVideoPath: output });
+      await output.commit();
+      await this.assetRepository.update({ id: asset.id, encodedVideoPath: outputTarget });
 
       return JobStatus.Success;
     } finally {
-      await staged.cleanup();
+      await Promise.all([staged.cleanup(), output.cleanup()]);
     }
   }
 
@@ -765,5 +772,25 @@ export class MediaService extends BaseService {
       throw error;
     }
     return { localPath: tmp, cleanup: () => fs.rm(tmp, { force: true }).then(() => {}) };
+  }
+
+  private async stageOutputIfS3(path: string): Promise<{
+    localPath: string;
+    commit: () => Promise<void>;
+    cleanup: () => Promise<void>;
+  }> {
+    if (!this.isS3Path(path)) {
+      return { localPath: path, commit: async () => {}, cleanup: async () => {} };
+    }
+    const s3 = this.getS3()!;
+    const tmp = StorageCore.getTempPathInDir(os.tmpdir());
+    await fs.mkdir(tmp.substring(0, tmp.lastIndexOf('/')), { recursive: true }).catch(() => {});
+    const commit = async () => {
+      const { stream, done } = await s3.writeStream(path);
+      await pipeline(createReadStream(tmp), stream);
+      await done();
+    };
+    const cleanup = () => fs.rm(tmp, { force: true }).then(() => {});
+    return { localPath: tmp, commit, cleanup };
   }
 }
