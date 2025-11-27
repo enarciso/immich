@@ -193,3 +193,13 @@ Open Questions / TODOs
 2025-11-24 — Stage S3 outputs locally before upload
 - `server/src/services/media.service.ts`: added `stageOutputIfS3` to write ffmpeg outputs to a temp file when the target is S3, upload via the S3 backend, and clean up afterward. Applied to video thumbnail generation and video conversion so ffmpeg never writes directly to `s3://`, preventing protocol errors and tmp bloat.
 - Adjusted temp output naming to carry the original file extension so ffmpeg can infer the muxer when writing staged outputs.
+
+2025-12-18 — Fix S3 thumbnail generation for images/videos
+- Issue: Production thumbnail jobs failed with Sharp “Input file is missing” and libvips write errors when hitting `s3://` paths; S3 originals also threw `NoSuchKey` during staging.
+- Change: Image thumbnail flow now stages originals and all outputs (preview/thumbnail/fullsize) locally, copies EXIF/XMP from staged input, then commits to S3 before cleanup. Video thumbhash now uses staged preview before cleanup. Paths: `server/src/services/media.service.ts`.
+- Status: Code updated; pending deployment and requeuing thumbnail jobs. Genuine `NoSuchKey` still requires restoring missing objects.
+
+2025-12-08 — New session setup
+- Read `AGENTS.md` and `codex.md` per instructions.
+- Verified frontend dev server binds to `0.0.0.0` (`web/package.json` dev script).
+- Attempted to review demo assets and Bastion logo, but no `demo/` directory or `Bastion_Logo` files are present in the repo; need paths/assets from the user.

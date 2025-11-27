@@ -273,67 +273,93 @@ export class MediaService extends BaseService {
     const { image } = await this.getConfig({ withCache: true });
     const previewPath = StorageCore.getImagePath(asset, AssetPathType.Preview, image.preview.format);
     const thumbnailPath = StorageCore.getImagePath(asset, AssetPathType.Thumbnail, image.thumbnail.format);
-    this.storageCore.ensureFolders(previewPath);
 
-    // Handle embedded preview extraction for RAW files
-    const extractEmbedded = image.extractEmbedded && mimeTypes.isRaw(asset.originalFileName);
-    const extracted = extractEmbedded ? await this.extractImage(asset.originalPath, image.preview.size) : null;
-    const generateFullsize =
-      (image.fullsize.enabled || asset.exifInfo.projectionType == 'EQUIRECTANGULAR') &&
-      !mimeTypes.isWebSupportedImage(asset.originalPath);
-    const convertFullsize = generateFullsize && (!extracted || !mimeTypes.isWebSupportedImage(` .${extracted.format}`));
+    const stagedInput = await this.stageInputIfS3(asset.originalPath);
+    const previewOutput = await this.stageOutputIfS3(previewPath);
+    const thumbnailOutput = await this.stageOutputIfS3(thumbnailPath);
+    let fullsizeOutput: Awaited<ReturnType<typeof this.stageOutputIfS3>> | undefined;
 
-    const { info, data, colorspace } = await this.decodeImage(
-      extracted ? extracted.buffer : asset.originalPath,
-      // only specify orientation to extracted images which don't have EXIF orientation data
-      // or it can double rotate the image
-      extracted ? asset.exifInfo : { ...asset.exifInfo, orientation: null },
-      convertFullsize ? undefined : image.preview.size,
-    );
+    try {
+      this.storageCore.ensureFolders(previewOutput.localPath);
+      this.storageCore.ensureFolders(thumbnailOutput.localPath);
 
-    // generate final images
-    const thumbnailOptions = { colorspace, processInvalidImages: false, raw: info };
-    const promises = [
-      this.mediaRepository.generateThumbhash(data, thumbnailOptions),
-      this.mediaRepository.generateThumbnail(data, { ...image.thumbnail, ...thumbnailOptions }, thumbnailPath),
-      this.mediaRepository.generateThumbnail(data, { ...image.preview, ...thumbnailOptions }, previewPath),
-    ];
+      // Handle embedded preview extraction for RAW files
+      const extractEmbedded = image.extractEmbedded && mimeTypes.isRaw(asset.originalFileName);
+      const extracted = extractEmbedded ? await this.extractImage(stagedInput.localPath, image.preview.size) : null;
+      const generateFullsize =
+        (image.fullsize.enabled || asset.exifInfo.projectionType == 'EQUIRECTANGULAR') &&
+        !mimeTypes.isWebSupportedImage(asset.originalPath);
+      const convertFullsize =
+        generateFullsize && (!extracted || !mimeTypes.isWebSupportedImage(` .${extracted.format}`));
 
-    let fullsizePath: string | undefined;
-
-    if (convertFullsize) {
-      // convert a new fullsize image from the same source as the thumbnail
-      fullsizePath = StorageCore.getImagePath(asset, AssetPathType.FullSize, image.fullsize.format);
-      const fullsizeOptions = { format: image.fullsize.format, quality: image.fullsize.quality, ...thumbnailOptions };
-      promises.push(this.mediaRepository.generateThumbnail(data, fullsizeOptions, fullsizePath));
-    } else if (generateFullsize && extracted && extracted.format === RawExtractedFormat.Jpeg) {
-      fullsizePath = StorageCore.getImagePath(asset, AssetPathType.FullSize, extracted.format);
-      this.storageCore.ensureFolders(fullsizePath);
-
-      // Write the buffer to disk with essential EXIF data
-      await this.storageRepository.createOrOverwriteFile(fullsizePath, extracted.buffer);
-      await this.mediaRepository.writeExif(
-        {
-          orientation: asset.exifInfo.orientation,
-          colorspace: asset.exifInfo.colorspace,
-        },
-        fullsizePath,
+      const { info, data, colorspace } = await this.decodeImage(
+        extracted ? extracted.buffer : stagedInput.localPath,
+        // only specify orientation to extracted images which don't have EXIF orientation data
+        // or it can double rotate the image
+        extracted ? asset.exifInfo : { ...asset.exifInfo, orientation: null },
+        convertFullsize ? undefined : image.preview.size,
       );
-    }
 
-    const outputs = await Promise.all(promises);
-
-    if (asset.exifInfo.projectionType === 'EQUIRECTANGULAR') {
+      // generate final images
+      const thumbnailOptions = { colorspace, processInvalidImages: false, raw: info };
       const promises = [
-        this.mediaRepository.copyTagGroup('XMP-GPano', asset.originalPath, previewPath),
-        fullsizePath
-          ? this.mediaRepository.copyTagGroup('XMP-GPano', asset.originalPath, fullsizePath)
-          : Promise.resolve(),
+        this.mediaRepository.generateThumbhash(data, thumbnailOptions),
+        this.mediaRepository.generateThumbnail(data, { ...image.thumbnail, ...thumbnailOptions }, thumbnailOutput.localPath),
+        this.mediaRepository.generateThumbnail(data, { ...image.preview, ...thumbnailOptions }, previewOutput.localPath),
       ];
-      await Promise.all(promises);
-    }
 
-    return { previewPath, thumbnailPath, fullsizePath, thumbhash: outputs[0] as Buffer };
+      let fullsizePath: string | undefined;
+
+      if (convertFullsize) {
+        // convert a new fullsize image from the same source as the thumbnail
+        fullsizePath = StorageCore.getImagePath(asset, AssetPathType.FullSize, image.fullsize.format);
+        const fullsizeOptions = { format: image.fullsize.format, quality: image.fullsize.quality, ...thumbnailOptions };
+        fullsizeOutput = await this.stageOutputIfS3(fullsizePath);
+        this.storageCore.ensureFolders(fullsizeOutput.localPath);
+        promises.push(this.mediaRepository.generateThumbnail(data, fullsizeOptions, fullsizeOutput.localPath));
+      } else if (generateFullsize && extracted && extracted.format === RawExtractedFormat.Jpeg) {
+        fullsizePath = StorageCore.getImagePath(asset, AssetPathType.FullSize, extracted.format);
+        fullsizeOutput = await this.stageOutputIfS3(fullsizePath);
+        this.storageCore.ensureFolders(fullsizeOutput.localPath);
+
+        // Write the buffer to disk with essential EXIF data
+        await this.storageRepository.createOrOverwriteFile(fullsizeOutput.localPath, extracted.buffer);
+        await this.mediaRepository.writeExif(
+          {
+            orientation: asset.exifInfo.orientation,
+            colorspace: asset.exifInfo.colorspace,
+          },
+          fullsizeOutput.localPath,
+        );
+      }
+
+      const outputs = await Promise.all(promises);
+
+      if (asset.exifInfo.projectionType === 'EQUIRECTANGULAR') {
+        const promises = [
+          this.mediaRepository.copyTagGroup('XMP-GPano', stagedInput.localPath, previewOutput.localPath),
+          fullsizeOutput
+            ? this.mediaRepository.copyTagGroup('XMP-GPano', stagedInput.localPath, fullsizeOutput.localPath)
+            : Promise.resolve(),
+        ];
+        await Promise.all(promises);
+      }
+
+      await Promise.all([
+        previewOutput.commit(),
+        thumbnailOutput.commit(),
+        fullsizeOutput ? fullsizeOutput.commit() : Promise.resolve(),
+      ]);
+
+      return { previewPath, thumbnailPath, fullsizePath, thumbhash: outputs[0] as Buffer };
+    } finally {
+      await Promise.all([
+        stagedInput.cleanup(),
+        previewOutput.cleanup(),
+        thumbnailOutput.cleanup(),
+        fullsizeOutput ? fullsizeOutput.cleanup() : Promise.resolve(),
+      ]);
+    }
   }
 
   @OnJob({ name: JobName.PersonGenerateThumbnail, queue: QueueName.ThumbnailGeneration })
@@ -436,6 +462,7 @@ export class MediaService extends BaseService {
     const thumbnailOutput = await this.stageOutputIfS3(thumbnailPath);
 
     const staged = await this.stageInputIfS3(asset.originalPath);
+    let thumbhash: Buffer;
     try {
       const { format, audioStreams, videoStreams } = await this.mediaRepository.probe(staged.localPath);
       const mainVideoStream = this.getMainStream(videoStreams);
@@ -458,14 +485,14 @@ export class MediaService extends BaseService {
       await previewOutput.commit();
       await this.mediaRepository.transcode(staged.localPath, thumbnailOutput.localPath, thumbnailOptions);
       await thumbnailOutput.commit();
+
+      thumbhash = await this.mediaRepository.generateThumbhash(previewOutput.localPath, {
+        colorspace: image.colorspace,
+        processInvalidImages: process.env.IMMICH_PROCESS_INVALID_IMAGES === 'true',
+      });
     } finally {
       await Promise.all([staged.cleanup(), previewOutput.cleanup(), thumbnailOutput.cleanup()]);
     }
-
-    const thumbhash = await this.mediaRepository.generateThumbhash(previewPath, {
-      colorspace: image.colorspace,
-      processInvalidImages: process.env.IMMICH_PROCESS_INVALID_IMAGES === 'true',
-    });
 
     return { previewPath, thumbnailPath, thumbhash };
   }
