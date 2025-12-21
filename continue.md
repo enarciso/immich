@@ -203,3 +203,21 @@ Open Questions / TODOs
 - Read `AGENTS.md` and `codex.md` per instructions.
 - Verified frontend dev server binds to `0.0.0.0` (`web/package.json` dev script).
 - Attempted to review demo assets and Bastion logo, but no `demo/` directory or `Bastion_Logo` files are present in the repo; need paths/assets from the user.
+
+2025-12-21 — Repository orientation refresh
+- Reviewed `AGENTS.md`, `codex.md`, and `continue.md` to align with current patterns and workflow expectations across packages.
+- No code changes; ready to proceed with scoped feature/bugfix work.
+
+2025-12-21 — Resolve asset-media merge conflicts (v2.4.1 + S3)
+- Resolved conflict markers in `server/src/services/asset-media.service.ts` by combining upstream sidecar handling + exif override with S3-safe `utimes` guards.
+- Commands: `rg -n "<<<<<<<|=======|>>>>>>>" server/src/services/asset-media.service.ts`, `sed -n '330,520p' server/src/services/asset-media.service.ts`.
+- Next: run server tests if broader validation is needed.
+
+2025-12-21 — Resolve Dockerfile/lockfile merge conflicts
+- Updated the plugins stage in `server/Dockerfile` to keep the PATH shim and platform-specific mise cache mount.
+- Installed pnpm to `/home/ubuntu/.local/bin/pnpm` and regenerated `pnpm-lock.yaml` to clear merge markers (`/home/ubuntu/.local/bin/pnpm -r --filter '!documentation' install --lockfile-only`).
+- Commands: `sed -n '40,90p' server/Dockerfile`, `npm install -g --prefix /home/ubuntu/.local pnpm@10.20.0`.
+
+2025-12-21 — Resolve build-mobile workflow conflict
+- Updated `.github/workflows/build-mobile.yml` to keep Ruby 3.4.7 with bundler cache, run `bundle exec pod install`, and drop conflict markers.
+- Commands: `sed -n '160,240p' .github/workflows/build-mobile.yml`.

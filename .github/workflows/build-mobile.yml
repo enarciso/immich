@@ -80,7 +80,7 @@ jobs:
         working-directory: ./mobile
         run: printf "%s" $KEY_JKS | base64 -d > android/key.jks
 
-      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+      - uses: actions/setup-java@f2beeb24e141e01a676f977032f5a29d81c9e27e # v5.1.0
         with:
           distribution: 'zulu'
           java-version: '17'
@@ -194,16 +194,15 @@ jobs:
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.4.7'
+          bundler-cache: true
           working-directory: ./mobile/ios
 
-      - name: Install Fastlane
+      - name: Install CocoaPods dependencies
+        working-directory: ./mobile/ios
         run: |
-          cd mobile/ios
-          gem install bundler
-          bundle config set --local path 'vendor/bundle'
-          bundle install
+          bundle exec pod install
 
-      - name: Create API Key JSON
+      - name: Create API Key
         env:
           API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
           API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}

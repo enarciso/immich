@@ -262,7 +262,7 @@ const getEnv = (): EnvData => {
         prefix: 'immich_bull',
         connection: { ...redisConfig },
         defaultJobOptions: {
-          attempts: 3,
+          attempts: 1,
           removeOnComplete: true,
           removeOnFail: false,
         },
