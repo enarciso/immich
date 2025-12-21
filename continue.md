@@ -221,3 +221,11 @@ Open Questions / TODOs
 2025-12-21 — Resolve build-mobile workflow conflict
 - Updated `.github/workflows/build-mobile.yml` to keep Ruby 3.4.7 with bundler cache, run `bundle exec pod install`, and drop conflict markers.
 - Commands: `sed -n '160,240p' .github/workflows/build-mobile.yml`.
+
+2025-12-21 — Fix metadata extraction sidecar staging
+- Updated `server/src/services/metadata.service.ts` to derive sidecar paths from `asset.files` and pass staged sidecar paths into `getExifTags`, aligning with v2.4.1 asset shape while keeping S3 staging.
+- Commands: `sed -n '240,360p' server/src/services/metadata.service.ts`, `sed -n '520,600p' server/src/services/metadata.service.ts`.
+
+2025-12-21 — Inspect running Immich users
+- Used `sudo docker exec` with `immich-admin list-users` to identify admin accounts in the running test stack.
+- Note: passwords are stored as hashes; only reset is possible.

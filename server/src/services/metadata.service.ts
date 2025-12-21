@@ -279,10 +279,17 @@ export class MetadataService extends BaseService {
 
     // Stage original/sidecar if stored in S3 for tools that require local files
     const stagedOriginal = await this.stageInputIfS3(asset.originalPath);
-    const stagedSidecar = asset.sidecarPath ? await this.stageInputIfS3(asset.sidecarPath) : null;
+    const { sidecarFile } = getAssetFiles(asset.files);
+    const sidecarPath = sidecarFile?.path ?? null;
+    const stagedSidecar = sidecarPath ? await this.stageInputIfS3(sidecarPath) : null;
     try {
       const [exifTags, stats] = await Promise.all([
-        this.getExifTags({ originalPath: stagedOriginal.localPath, sidecarPath: stagedSidecar?.localPath || null, type: asset.type }),
+        this.getExifTags({
+          originalPath: stagedOriginal.localPath,
+          sidecarPath: stagedSidecar?.localPath || null,
+          files: asset.files,
+          type: asset.type,
+        }),
         this.storageRepository.stat(stagedOriginal.localPath),
       ]);
       this.logger.verbose('Exif Tags', exifTags);
@@ -537,12 +544,18 @@ export class MetadataService extends BaseService {
     return { width, height };
   }
 
-  private async getExifTags(asset: { originalPath: string; files: AssetFile[]; type: AssetType }): Promise<ImmichTags> {
+  private async getExifTags(asset: {
+    originalPath: string;
+    files: AssetFile[];
+    type: AssetType;
+    sidecarPath?: string | null;
+  }): Promise<ImmichTags> {
     const { sidecarFile } = getAssetFiles(asset.files);
+    const sidecarPath = asset.sidecarPath ?? sidecarFile?.path ?? null;
 
     const [mediaTags, sidecarTags, videoTags] = await Promise.all([
       this.metadataRepository.readTags(asset.originalPath),
-      sidecarFile ? this.metadataRepository.readTags(sidecarFile.path) : null,
+      sidecarPath ? this.metadataRepository.readTags(sidecarPath) : null,
       asset.type === AssetType.Video ? this.getVideoTags(asset.originalPath) : null,
     ]);
 
