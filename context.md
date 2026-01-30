@@ -1,4 +1,4 @@
-# Immich — Agent Continuity Log (continue.md)
+# Immich — Agent Continuity Log (context.md)
 
 This file captures durable context, decisions, and next steps so work can resume smoothly after restarts.
 
@@ -153,7 +153,7 @@ Open Questions / TODOs
 2025-11-22 — Refresh AGENTS/codex after repo survey
 - Re-surveyed the monorepo layout, workspace config, package manifests, and tooling versions (pnpm 10.20.0, Node 24.11.0) to ensure guidance matches current state, including the `plugins/` workspace.
 - Rewrote `AGENTS.md` and `codex.md` to emphasize pattern alignment, package-specific workflows, validation expectations, generated assets, and safety/process rules.
-- Commands: `pwd`, `ls`, `cat continue.md`, `cat AGENTS.md`, `cat codex.md`, `cat pnpm-workspace.yaml`, `cat package.json`, `cat server/package.json`, `cat web/package.json`, `cat cli/package.json`, `cat open-api/typescript-sdk/package.json`, `cat e2e/package.json`, `cat docs/package.json`, `sed -n '1,200p' machine-learning/pyproject.toml`, `sed -n '1,120p' mobile/pubspec.yaml`, `sed -n '1,200p' Makefile`, `ls server/src`, `ls web/src`, `ls cli/src`, `ls plugins`, `cat plugins/package.json`, `date`.
+- Commands: `pwd`, `ls`, `cat context.md`, `cat AGENTS.md`, `cat codex.md`, `cat pnpm-workspace.yaml`, `cat package.json`, `cat server/package.json`, `cat web/package.json`, `cat cli/package.json`, `cat open-api/typescript-sdk/package.json`, `cat e2e/package.json`, `cat docs/package.json`, `sed -n '1,200p' machine-learning/pyproject.toml`, `sed -n '1,120p' mobile/pubspec.yaml`, `sed -n '1,200p' Makefile`, `ls server/src`, `ls web/src`, `ls cli/src`, `ls plugins`, `cat plugins/package.json`, `date`.
 - Next: Ready to pick up feature/bugfix work using the refreshed playbook.
 
 2025-11-22 — Regenerate pnpm lockfile
@@ -205,7 +205,7 @@ Open Questions / TODOs
 - Attempted to review demo assets and Bastion logo, but no `demo/` directory or `Bastion_Logo` files are present in the repo; need paths/assets from the user.
 
 2025-12-21 — Repository orientation refresh
-- Reviewed `AGENTS.md`, `codex.md`, and `continue.md` to align with current patterns and workflow expectations across packages.
+- Reviewed `AGENTS.md`, `codex.md`, and `context.md` to align with current patterns and workflow expectations across packages.
 - No code changes; ready to proceed with scoped feature/bugfix work.
 
 2025-12-21 — Resolve asset-media merge conflicts (v2.4.1 + S3)
@@ -229,3 +229,12 @@ Open Questions / TODOs
 2025-12-21 — Inspect running Immich users
 - Used `sudo docker exec` with `immich-admin list-users` to identify admin accounts in the running test stack.
 - Note: passwords are stored as hashes; only reset is possible.
+
+2026-01-01 — Rename continuity log to context.md
+- Renamed `continue.md` to `context.md` and updated references in `AGENTS.md` and `codex.md`.
+
+2026-01-01 — S3 data transfer audit (no code changes)
+- Reviewed S3-related transfer paths (server streaming, metadata/thumbnail staging, ML uploads, download archives) and prepared optimization options pending scope confirmation.
+
+2026-01-01 — S3 cost context
+- Confirmed S3 bucket + EC2 are both us-east-1 and env uses S3 engine; keep API proxy behavior to stay close to upstream while focusing on transfer-reduction options.

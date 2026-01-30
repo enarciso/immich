@@ -26,7 +26,7 @@
 
 ### Other top-level directories
 - `mobile/` Flutter app; `machine-learning/` FastAPI service; `docker/` Compose files; `deployment/` IaC
-- Supporting roots: `design/`, `i18n/`, `readme_i18n/`, `fastlane/`, `misc/`, `install.sh`, `continue.md`, `pnpm-lock.yaml` (treat as read-only unless scoped).
+- Supporting roots: `design/`, `i18n/`, `readme_i18n/`, `fastlane/`, `misc/`, `install.sh`, `context.md`, `pnpm-lock.yaml` (treat as read-only unless scoped).
 
 ## Package & Pattern Notes
 ### Server (`server/`)
@@ -104,7 +104,7 @@ Document skipped checks with a brief reason.
 - Keep dependency additions minimal and scoped; update lockfiles immediately when package manifests change.
 
 ## Process, Communication & Safety
-- Read `continue.md` at session start; append meaningful work (what changed, commands, decisions, next steps) before yielding.
+- Read `context.md` at session start; append meaningful work (what changed, commands, decisions, next steps) before yielding.
 - For non-trivial tasks, capture a 3–7 step plan via the plan tool with exactly one `in_progress` step; update as you proceed.
 - Use `rg` for search and targeted file views (≤250 lines). Edit via `apply_patch`; avoid mass reformatting or moving code without need.
 - Summaries must cite files with `path:line` and list tests run/skipped (with reasons).

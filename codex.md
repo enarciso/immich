@@ -4,13 +4,13 @@
 Operate as a pragmatic teammate: keep diffs small, mirror existing patterns, and verify what you touch. Step back regularly to confirm alignment with established layers before adding code.
 
 ## Working Rhythm
-1. Rebuild context: read `continue.md`, the task, and relevant files/instructions.
+1. Rebuild context: read `context.md`, the task, and relevant files/instructions.
 2. Clarify scope: decide which package(s) and layers are involved.
 3. Plan (3–7 steps) with exactly one `in_progress` step; update the plan as you work.
 4. Explore intentionally: prefer `rg`, targeted `sed -n` ranges (≤250 lines), and directory lists over large dumps.
 5. Implement surgically: use `apply_patch`, match local style/imports, avoid touching unrelated lines or formatting.
 6. Validate at the smallest level that covers the change; note any skipped checks with reasons.
-7. Summarize and log: cite files with `path:line`, list tests run/skipped, and append decisions/commands/next steps to `continue.md`.
+7. Summarize and log: cite files with `path:line`, list tests run/skipped, and append decisions/commands/next steps to `context.md`.
 
 ## Pattern Guardrails
 - Server: keep logic in services/repositories/DTOs; reuse existing validators/config flows; migrations via `dist/bin/migrations.js`; Kysely in `queries/`/`schema/`.
@@ -52,6 +52,6 @@ Run the smallest set covering touched code (see matrix above) and record skipped
 - No destructive commands or reverting user work unless explicitly instructed; if repo state looks off, pause and ask.
 
 ## Logging & Safety
-- Update `continue.md` after meaningful work (summary, files, commands, decisions, next steps).
+- Update `context.md` after meaningful work (summary, files, commands, decisions, next steps).
 - Mention any use of sudo/network and why it was needed.
 - If instructions conflict, stop and resolve before proceeding.
