@@ -17,6 +17,7 @@ import {
   ImmichHeader,
   ImmichTelemetry,
   ImmichWorker,
+  LogFormat,
   LogLevel,
   QueueName,
 } from 'src/enum';
@@ -29,6 +30,7 @@ export interface EnvData {
   environment: ImmichEnvironment;
   configFile?: string;
   logLevel?: LogLevel;
+  logFormat?: LogFormat;
 
   buildMetadata: {
     build?: string;
@@ -90,6 +92,10 @@ export interface EnvData {
 
   redis: RedisOptions;
 
+  setup: {
+    allow: boolean;
+  };
+
   telemetry: {
     apiPort: number;
     microservicesPort: number;
@@ -117,8 +123,10 @@ export interface EnvData {
   workers: ImmichWorker[];
 
   plugins: {
-    enabled: boolean;
-    installFolder?: string;
+    external: {
+      allow: boolean;
+      installFolder?: string;
+    };
   };
 
   noColor: boolean;
@@ -240,6 +248,7 @@ const getEnv = (): EnvData => {
     environment,
     configFile: dto.IMMICH_CONFIG_FILE,
     logLevel: dto.IMMICH_LOG_LEVEL,
+    logFormat: dto.IMMICH_LOG_FORMAT || LogFormat.Console,
 
     buildMetadata: {
       build: dto.IMMICH_BUILD,
@@ -326,6 +335,10 @@ const getEnv = (): EnvData => {
       corePlugin: join(buildFolder, 'corePlugin'),
     },
 
+    setup: {
+      allow: dto.IMMICH_ALLOW_SETUP ?? true,
+    },
+
     storage: {
       ignoreMountCheckErrors: !!dto.IMMICH_IGNORE_MOUNT_CHECK_ERRORS,
       mediaLocation: dto.IMMICH_MEDIA_LOCATION,
@@ -353,8 +366,10 @@ const getEnv = (): EnvData => {
     workers,
 
     plugins: {
-      enabled: !!dto.IMMICH_PLUGINS_ENABLED,
-      installFolder: dto.IMMICH_PLUGINS_INSTALL_FOLDER,
+      external: {
+        allow: dto.IMMICH_ALLOW_EXTERNAL_PLUGINS ?? false,
+        installFolder: dto.IMMICH_PLUGINS_INSTALL_FOLDER,
+      },
     },
 
     noColor: !!dto.NO_COLOR,

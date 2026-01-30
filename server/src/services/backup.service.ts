@@ -1,13 +1,20 @@
 import { Injectable } from '@nestjs/common';
-import { DateTime } from 'luxon';
 import path from 'node:path';
-import semver from 'semver';
+import { pipeline } from 'node:stream/promises';
+import { DateTime } from 'luxon';
 import { serverVersion } from 'src/constants';
 import { StorageCore } from 'src/cores/storage.core';
 import { OnEvent, OnJob } from 'src/decorators';
 import { DatabaseLock, ImmichWorker, JobName, JobStatus, QueueName, StorageFolder } from 'src/enum';
 import { ArgOf } from 'src/repositories/event.repository';
 import { BaseService } from 'src/services/base.service';
+import {
+  buildPostgresLaunchArguments,
+  createDatabaseBackup,
+  isFailedDatabaseBackupName,
+  isValidDatabaseRoutineBackupName,
+  UnsupportedPostgresError,
+} from 'src/utils/database-backups';
 import { handlePromiseError } from 'src/utils/misc';
 import { S3AppStorageBackend } from 'src/storage/s3-backend';
 
@@ -86,23 +93,15 @@ export class BackupService extends BaseService {
 
     const backupsFolder = StorageCore.getBaseFolder(StorageFolder.Backups);
     const s3 = this.getS3();
-    let files: string[] = [];
-    if (s3 && (backupsFolder.startsWith('s3://') || StorageCore.isImmichPath(backupsFolder))) {
-      // List immediate files under the backups prefix on S3
-      files = await s3.list(backupsFolder);
-    } else {
-      files = await this.storageRepository.readdir(backupsFolder);
-    }
-    const failedBackups = files.filter((file) => file.match(/immich-db-backup-.*\.sql\.gz\.tmp$/));
+    const files =
+      s3 && (backupsFolder.startsWith('s3://') || StorageCore.isImmichPath(backupsFolder))
+        ? await s3.list(backupsFolder)
+        : await this.storageRepository.readdir(backupsFolder);
     const backups = files
-      .filter((file) => {
-        const oldBackupStyle = file.match(/immich-db-backup-\d+\.sql\.gz$/);
-        //immich-db-backup-20250729T114018-v1.136.0-pg14.17.sql.gz
-        const newBackupStyle = file.match(/immich-db-backup-\d{8}T\d{6}-v.*-pg.*\.sql\.gz$/);
-        return oldBackupStyle || newBackupStyle;
-      })
+      .filter((filename) => isValidDatabaseRoutineBackupName(filename))
       .toSorted()
       .toReversed();
+    const failedBackups = files.filter((filename) => isFailedDatabaseBackupName(filename));
 
     const toDelete = backups.slice(config.keepLastAmount);
     toDelete.push(...failedBackups);
@@ -120,169 +119,72 @@ export class BackupService extends BaseService {
 
   @OnJob({ name: JobName.DatabaseBackup, queue: QueueName.BackupDatabase })
   async handleBackupDatabase(): Promise<JobStatus> {
-    this.logger.debug(`Database Backup Started`);
-    const { database } = this.configRepository.getEnv();
-    const config = database.config;
-
-    const isUrlConnection = config.connectionType === 'url';
-
-    let connectionUrl: string = isUrlConnection ? config.url : '';
-    if (URL.canParse(connectionUrl)) {
-      // remove known bad url parameters for pg_dumpall
-      const url = new URL(connectionUrl);
-      url.searchParams.delete('uselibpqcompat');
-      connectionUrl = url.toString();
-    }
-
-    const databaseParams = isUrlConnection
-      ? ['--dbname', connectionUrl]
-      : [
-          '--username',
-          config.username,
-          '--host',
-          config.host,
-          '--port',
-          `${config.port}`,
-          '--database',
-          config.database,
-        ];
-
-    databaseParams.push('--clean', '--if-exists');
-    const databaseVersion = await this.databaseRepository.getPostgresVersion();
-    const backupsFolder = StorageCore.getBaseFolder(StorageFolder.Backups);
-    const filename = `immich-db-backup-${DateTime.now().toFormat("yyyyLLdd'T'HHmmss")}-v${serverVersion.toString()}-pg${
-      databaseVersion.split(' ')[0]
-    }.sql.gz`;
-    const backupFilePath = this.joinPaths(backupsFolder, `${filename}.tmp`);
-    const finalFilePath = this.joinPaths(backupsFolder, filename);
-    const databaseSemver = semver.coerce(databaseVersion);
-    const databaseMajorVersion = databaseSemver?.major;
-
-    if (!databaseMajorVersion || !databaseSemver || !semver.satisfies(databaseSemver, '>=14.0.0 <19.0.0')) {
-      this.logger.error(`Database Backup Failure: Unsupported PostgreSQL version: ${databaseVersion}`);
-      return JobStatus.Failed;
-    }
-
-    this.logger.log(`Database Backup Starting. Database Version: ${databaseMajorVersion}`);
-
     try {
-      const s3 = this.getS3();
-      let s3Finalize: (() => Promise<void>) | null = null;
-      await new Promise<void>((resolve, reject) => {
-        const pgdump = this.processRepository.spawn(
-          `/usr/lib/postgresql/${databaseMajorVersion}/bin/pg_dumpall`,
-          databaseParams,
-          {
-            env: {
-              PATH: process.env.PATH,
-              PGPASSWORD: isUrlConnection ? new URL(connectionUrl).password : config.password,
-            },
-          },
-        );
-
-        // NOTE: `--rsyncable` is only supported in GNU gzip
-        const gzip = this.processRepository.spawn(`gzip`, ['--rsyncable']);
-        pgdump.stdout.pipe(gzip.stdin);
-
-        // Select destination stream: local FS or S3
-        if (s3 && (backupsFolder.startsWith('s3://') || StorageCore.isImmichPath(backupsFolder))) {
-          s3.writeStream(backupFilePath)
-            .then(({ stream, done }) => {
-              s3Finalize = done;
-              gzip.stdout.pipe(stream);
-            })
-            .catch((err) => {
-              this.logger.error('Failed to start S3 upload stream', {
-                path: backupFilePath,
-                error: (err as Error)?.message || err,
-              });
-              reject(err);
-            });
-        } else {
-          const fileStream = this.storageRepository.createWriteStream(backupFilePath);
-          gzip.stdout.pipe(fileStream);
-        }
-
-        pgdump.on('error', (err) => {
-          this.logger.error(`Backup failed with error: ${err}`);
-          reject(err);
-        });
-
-        gzip.on('error', (err) => {
-          this.logger.error(`Gzip failed with error: ${err}`);
-          reject(err);
-        });
-
-        let pgdumpLogs = '';
-        let gzipLogs = '';
-
-        pgdump.stderr.on('data', (data) => (pgdumpLogs += data));
-        gzip.stderr.on('data', (data) => (gzipLogs += data));
-
-        pgdump.on('exit', (code) => {
-          if (code !== 0) {
-            this.logger.error(`Backup failed with code ${code}`);
-            reject(`Backup failed with code ${code}`);
-            this.logger.error(pgdumpLogs);
-            return;
-          }
-          if (pgdumpLogs) {
-            this.logger.debug(`pgdump_all logs\n${pgdumpLogs}`);
-          }
-        });
-
-        gzip.on('exit', (code) => {
-          if (code !== 0) {
-            this.logger.error(`Gzip failed with code ${code}`);
-            reject(`Gzip failed with code ${code}`);
-            this.logger.error(gzipLogs);
-            return;
-          }
-          if (pgdump.exitCode !== 0) {
-            this.logger.error(`Gzip exited with code 0 but pgdump exited with ${pgdump.exitCode}`);
-            return;
-          }
-          // Ensure S3 multipart upload has completed
-          if (s3Finalize) {
-            s3Finalize()
-              .then(() => resolve())
-              .catch((err) => {
-                this.logger.error('Failed to finalize S3 upload', {
-                  path: backupFilePath,
-                  error: (err as Error)?.message || err,
-                });
-                reject(err);
-              });
-          } else {
-            resolve();
-          }
-        });
-      });
-      // Finalize: rename tmp → final
-      const s3w = this.getS3();
-      if (s3w && (backupsFolder.startsWith('s3://') || StorageCore.isImmichPath(backupsFolder))) {
-        await s3w.copyObject(backupFilePath, finalFilePath);
-        await s3w.deleteObject(backupFilePath);
-      } else {
-        await this.storageRepository.rename(backupFilePath, finalFilePath);
-      }
-    } catch (error) {
-      this.logger.error(`Database Backup Failure: ${error}`);
+      const backupsFolder = StorageCore.getBaseFolder(StorageFolder.Backups);
       const s3 = this.getS3();
       if (s3 && (backupsFolder.startsWith('s3://') || StorageCore.isImmichPath(backupsFolder))) {
-        await s3.deleteObject(backupFilePath).catch((err) =>
-          this.logger.error(`Failed to delete failed backup object: ${err}`),
-        );
+        await this.createDatabaseBackupInS3(s3, backupsFolder);
       } else {
-        await this.storageRepository
-          .unlink(backupFilePath)
-          .catch((err) => this.logger.error(`Failed to delete failed backup file: ${err}`));
+        await createDatabaseBackup(this.backupRepos);
+      }
+    } catch (error) {
+      if (error instanceof UnsupportedPostgresError) {
+        return JobStatus.Failed;
       }
       throw error;
     }
 
-    this.logger.log(`Database Backup Success`);
     await this.cleanupDatabaseBackups();
     return JobStatus.Success;
+  }
+
+  private get backupRepos() {
+    return {
+      logger: this.logger,
+      storage: this.storageRepository,
+      config: this.configRepository,
+      process: this.processRepository,
+      database: this.databaseRepository,
+    };
+  }
+
+  private async createDatabaseBackupInS3(s3: S3AppStorageBackend, backupsFolder: string) {
+    this.logger.debug(`Database Backup Started`);
+
+    const { bin, args, databasePassword, databaseVersion, databaseMajorVersion } = await buildPostgresLaunchArguments(
+      { logger: this.logger, config: this.configRepository, database: this.databaseRepository },
+      'pg_dump',
+    );
+
+    this.logger.log(`Database Backup Starting. Database Version: ${databaseMajorVersion}`);
+
+    const filename = `immich-db-backup-${DateTime.now().toFormat("yyyyLLdd'T'HHmmss")}-v${serverVersion.toString()}-pg${
+      databaseVersion.split(' ')[0]
+    }.sql.gz`;
+    const backupFilePath = this.joinPaths(backupsFolder, filename);
+    const temporaryFilePath = `${backupFilePath}.tmp`;
+
+    try {
+      const pgdump = this.processRepository.spawnDuplexStream(bin, args, {
+        env: {
+          PATH: process.env.PATH,
+          PGPASSWORD: databasePassword,
+        },
+      });
+      const gzip = this.processRepository.spawnDuplexStream('gzip', ['--rsyncable']);
+      const { stream, done } = await s3.writeStream(temporaryFilePath);
+      await pipeline(pgdump, gzip, stream);
+      await done();
+
+      await s3.copyObject(temporaryFilePath, backupFilePath);
+      await s3.deleteObject(temporaryFilePath);
+      this.logger.log(`Database Backup Success`);
+    } catch (error) {
+      this.logger.error(`Database Backup Failure: ${error}`);
+      await s3
+        .deleteObject(temporaryFilePath)
+        .catch((err) => this.logger.error(`Failed to delete failed backup object: ${err}`));
+      throw error;
+    }
   }
 }

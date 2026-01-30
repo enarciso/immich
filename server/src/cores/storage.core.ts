@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { StorageAsset } from 'src/database';
+import { AssetFileType, AssetPathType, ImageFormat, PathType, PersonPathType, RawExtractedFormat, StorageFolder } from 'src/enum';
 import { S3AppStorageBackend } from 'src/storage/s3-backend';
-import { AssetFileType, AssetPathType, ImageFormat, PathType, PersonPathType, StorageFolder } from 'src/enum';
 import { AssetRepository } from 'src/repositories/asset.repository';
 import { ConfigRepository } from 'src/repositories/config.repository';
 import { CryptoRepository } from 'src/repositories/crypto.repository';
@@ -25,10 +25,9 @@ export interface MoveRequest {
   };
 }
 
-export type GeneratedImageType = AssetPathType.Preview | AssetPathType.Thumbnail | AssetPathType.FullSize;
-export type GeneratedAssetType = GeneratedImageType | AssetPathType.EncodedVideo;
-
 export type ThumbnailPathEntity = { id: string; ownerId: string };
+
+export type ImagePathOptions = { fileType: AssetFileType; format: ImageFormat | RawExtractedFormat; isEdited: boolean };
 
 let instance: StorageCore | null;
 
@@ -135,8 +134,12 @@ export class StorageCore {
     return StorageCore.getNestedPath(StorageFolder.Thumbnails, person.ownerId, `${person.id}.jpeg`);
   }
 
-  static getImagePath(asset: ThumbnailPathEntity, type: GeneratedImageType, format: 'jpeg' | 'webp') {
-    return StorageCore.getNestedPath(StorageFolder.Thumbnails, asset.ownerId, `${asset.id}-${type}.${format}`);
+  static getImagePath(asset: ThumbnailPathEntity, { fileType, format, isEdited }: ImagePathOptions) {
+    return StorageCore.getNestedPath(
+      StorageFolder.Thumbnails,
+      asset.ownerId,
+      `${asset.id}_${fileType}${isEdited ? '_edited' : ''}.${format}`,
+    );
   }
 
   static getEncodedVideoPath(asset: ThumbnailPathEntity) {
@@ -169,14 +172,14 @@ export class StorageCore {
     return normalizedPath.startsWith(normalizedBase);
   }
 
-  async moveAssetImage(asset: StorageAsset, pathType: GeneratedImageType, format: ImageFormat) {
+  async moveAssetImage(asset: StorageAsset, fileType: AssetFileType, format: ImageFormat) {
     const { id: entityId, files } = asset;
-    const oldFile = getAssetFile(files, pathType);
+    const oldFile = getAssetFile(files, fileType, { isEdited: false });
     return this.moveFile({
       entityId,
-      pathType,
+      pathType: fileType,
       oldPath: oldFile?.path || null,
-      newPath: StorageCore.getImagePath(asset, pathType, format),
+      newPath: StorageCore.getImagePath(asset, { fileType, format, isEdited: false }),
     });
   }
 
@@ -371,19 +374,19 @@ export class StorageCore {
       case AssetPathType.Original: {
         return this.assetRepository.update({ id, originalPath: newPath });
       }
-      case AssetPathType.FullSize: {
+      case AssetFileType.FullSize: {
         return this.assetRepository.upsertFile({ assetId: id, type: AssetFileType.FullSize, path: newPath });
       }
-      case AssetPathType.Preview: {
+      case AssetFileType.Preview: {
         return this.assetRepository.upsertFile({ assetId: id, type: AssetFileType.Preview, path: newPath });
       }
-      case AssetPathType.Thumbnail: {
+      case AssetFileType.Thumbnail: {
         return this.assetRepository.upsertFile({ assetId: id, type: AssetFileType.Thumbnail, path: newPath });
       }
       case AssetPathType.EncodedVideo: {
         return this.assetRepository.update({ id, encodedVideoPath: newPath });
       }
-      case AssetPathType.Sidecar: {
+      case AssetFileType.Sidecar: {
         return this.assetRepository.upsertFile({ assetId: id, type: AssetFileType.Sidecar, path: newPath });
       }
       case PersonPathType.Face: {

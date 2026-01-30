@@ -238,3 +238,23 @@ Open Questions / TODOs
 
 2026-01-01 — S3 cost context
 - Confirmed S3 bucket + EC2 are both us-east-1 and env uses S3 engine; keep API proxy behavior to stay close to upstream while focusing on transfer-reduction options.
+
+2026-01-30 — Resolve v2.5.2 merge conflicts (preserve S3 support)
+
+- Resolved conflicts in server storage/backup/media services, keeping S3 staging + S3 backup streaming while aligning with upstream refactors (extractOriginalImage, getImageFile, syncFiles). Added S3-aware backup path using buildPostgresLaunchArguments + stream pipeline to S3. Files: server/src/cores/storage.core.ts, server/src/services/backup.service.ts, server/src/services/media.service.ts.
+- Adopted upstream build-mobile workflow (workflow_call + iOS cert import/keychain handling) and merged docs restore process text while keeping S3 backup note. Files: .github/workflows/build-mobile.yml, docs/docs/administration/backup-and-restore.md.
+- Rebuilt pnpm-lock.yaml to resolve conflicts and include current deps.
+
+Commands:
+- git status -sb
+- sed -n (various files), rg -n
+- git show build-v2.5.2:.github/workflows/build-mobile.yml
+- : > pnpm-lock.yaml
+- npx pnpm@10.20.0 -r --filter '!documentation' install --lockfile-only (timed out but lockfile generated)
+
+Notes:
+- Used network to fetch pnpm via npx; command timed out after completion but pnpm-lock.yaml regenerated.
+- Node in shell was v18.19.1 (engine warnings expected).
+
+Next steps:
+- Consider running targeted server tests if touching media/backup logic.
