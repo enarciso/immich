@@ -258,3 +258,15 @@ Notes:
 
 Next steps:
 - Consider running targeted server tests if touching media/backup logic.
+
+2026-01-30 — Fix S3 backup listing error (admin maintenance 500)
+
+- Root cause: listDatabaseBackups used fs readdir/stat on an s3:// path, causing ENOENT in production.
+- Changes: added S3-aware list/delete/upload/download logic in server/src/utils/database-backups.ts using ConfigRepository to initialize S3 backend, plus safe joinPaths for s3:// paths.
+
+Commands:
+- rg -n "database backups|database-backup|backup" server/src
+- sed -n on server/src/utils/database-backups.ts
+
+Next steps:
+- Rebuild/redeploy immich_server to pick up the fix.

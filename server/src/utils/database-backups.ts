@@ -14,6 +14,7 @@ import { DatabaseRepository } from 'src/repositories/database.repository';
 import { LoggingRepository } from 'src/repositories/logging.repository';
 import { ProcessRepository } from 'src/repositories/process.repository';
 import { StorageRepository } from 'src/repositories/storage.repository';
+import { S3AppStorageBackend } from 'src/storage/s3-backend';
 
 export function isValidDatabaseBackupName(filename: string) {
   return filename.match(/^[\d\w-.]+\.sql(?:\.gz)?$/);
@@ -41,6 +42,35 @@ type BackupRepos = {
   process: ProcessRepository;
   database: DatabaseRepository;
   health: MaintenanceHealthRepository;
+};
+
+const joinPaths = (base: string, part: string): string => {
+  if (base.startsWith('s3://')) {
+    const head = base.replace(/\/+$/g, '');
+    const tail = part.replace(/^\/+/, '');
+    return `${head}/${tail}`;
+  }
+  return path.join(base, part);
+};
+
+const getS3 = (config: ConfigRepository): S3AppStorageBackend | null => {
+  const env = config.getEnv();
+  const s3c = env.storage.s3;
+  if (env.storage.engine === 's3' && s3c && s3c.bucket) {
+    return new S3AppStorageBackend({
+      endpoint: s3c.endpoint,
+      region: s3c.region || 'us-east-1',
+      bucket: s3c.bucket,
+      prefix: s3c.prefix,
+      forcePathStyle: s3c.forcePathStyle,
+      useAccelerate: s3c.useAccelerate,
+      accessKeyId: s3c.accessKeyId,
+      secretAccessKey: s3c.secretAccessKey,
+      sse: s3c.sse as any,
+      sseKmsKeyId: s3c.sseKmsKeyId,
+    });
+  }
+  return null;
 };
 
 export class UnsupportedPostgresError extends Error {
@@ -363,21 +393,36 @@ export async function restoreDatabaseBackup(
   logger.log(`Database Restore Success`);
 }
 
-export async function deleteDatabaseBackup({ storage }: Pick<BackupRepos, 'storage'>, files: string[]): Promise<void> {
+export async function deleteDatabaseBackup(
+  { storage, config }: Pick<BackupRepos, 'storage' | 'config'>,
+  files: string[],
+): Promise<void> {
   const backupsFolder = StorageCore.getBaseFolder(StorageFolder.Backups);
+  const s3 = getS3(config);
 
   if (files.some((filename) => !isValidDatabaseBackupName(filename))) {
     throw new BadRequestException('Invalid backup name!');
   }
 
-  await Promise.all(files.map((filename) => storage.unlink(path.join(backupsFolder, filename))));
+  await Promise.all(
+    files.map((filename) => {
+      const filePath = joinPaths(backupsFolder, filename);
+      if (s3 && backupsFolder.startsWith('s3://')) {
+        return s3.deleteObject(filePath);
+      }
+      return storage.unlink(filePath);
+    }),
+  );
 }
 
 export async function listDatabaseBackups({
   storage,
-}: Pick<BackupRepos, 'storage'>): Promise<{ filename: string; filesize: number }[]> {
+  config,
+}: Pick<BackupRepos, 'storage' | 'config'>): Promise<{ filename: string; filesize: number }[]> {
   const backupsFolder = StorageCore.getBaseFolder(StorageFolder.Backups);
-  const files = await storage.readdir(backupsFolder);
+  const s3 = getS3(config);
+  const files =
+    s3 && backupsFolder.startsWith('s3://') ? await s3.list(backupsFolder) : await storage.readdir(backupsFolder);
 
   const validFiles = files
     .filter((fn) => isValidDatabaseBackupName(fn))
@@ -386,7 +431,12 @@ export async function listDatabaseBackups({
 
   const backups = await Promise.all(
     validFiles.map(async (filename) => {
-      const stats = await storage.stat(path.join(backupsFolder, filename));
+      const filePath = joinPaths(backupsFolder, filename);
+      if (s3 && backupsFolder.startsWith('s3://')) {
+        const head = await s3.head(filePath);
+        return { filename, filesize: Number(head.size || 0) };
+      }
+      const stats = await storage.stat(filePath);
       return { filename, filesize: stats.size };
     }),
   );
@@ -395,7 +445,7 @@ export async function listDatabaseBackups({
 }
 
 export async function uploadDatabaseBackup(
-  { storage }: Pick<BackupRepos, 'storage'>,
+  { storage, config }: Pick<BackupRepos, 'storage' | 'config'>,
   file: Express.Multer.File,
 ): Promise<void> {
   const backupsFolder = StorageCore.getBaseFolder(StorageFolder.Backups);
@@ -404,7 +454,12 @@ export async function uploadDatabaseBackup(
     throw new BadRequestException('Invalid backup name!');
   }
 
-  const path = join(backupsFolder, `uploaded-${fn}`);
+  const path = joinPaths(backupsFolder, `uploaded-${fn}`);
+  const s3 = getS3(config);
+  if (s3 && backupsFolder.startsWith('s3://')) {
+    await s3.putObject(path, file.buffer);
+    return;
+  }
   await storage.createOrOverwriteFile(path, file.buffer);
 }
 
@@ -413,7 +468,7 @@ export function downloadDatabaseBackup(fileName: string) {
     throw new BadRequestException('Invalid backup name!');
   }
 
-  const path = join(StorageCore.getBaseFolder(StorageFolder.Backups), fileName);
+  const path = joinPaths(StorageCore.getBaseFolder(StorageFolder.Backups), fileName);
 
   return {
     path,
