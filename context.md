@@ -270,3 +270,21 @@ Commands:
 
 Next steps:
 - Rebuild/redeploy immich_server to pick up the fix.
+
+2026-02-15 — Resolve v2.5.6 merge conflicts and preserve S3 backups
+
+- Resolved unmerged files:
+  - `server/src/utils/database-backups.ts`: kept upstream utility-only content (`isValid*`, `findDatabaseBackupVersion`, `UnsupportedPostgresError`).
+  - `server/src/services/backup.service.ts`: accepted upstream deletion (service superseded by `DatabaseBackupService`).
+  - `pnpm-lock.yaml`: regenerated with `pnpm -r --filter '!documentation' install --lockfile-only`.
+- Reintroduced custom S3 backup behavior in active service:
+  - `server/src/services/database-backup.service.ts` now supports S3 for backup creation (`writeStream` + temp object promotion), upload/list/delete/cleanup, download path joining, and restore reads (`head`/`readStream` for S3 paths).
+  - Added S3 helper methods: joined path handling, backend initialization, S3 path detection, stream helpers.
+- Added regression coverage:
+  - `server/src/services/database-backup.service.spec.ts` includes S3 cases for create/upload/list/delete/download.
+- Commands:
+  - `./node_modules/.bin/vitest run --config test/vitest.config.mjs src/services/database-backup.service.spec.ts` (pass)
+  - `./node_modules/.bin/vitest run --config test/vitest.config.mjs src/cores/storage.core.spec.ts` (pass)
+  - `pnpm --filter immich run check` (fails on pre-existing `download.service.spec.ts` mock typing: `ImmichZipStream` missing `addStream`).
+- Notes:
+  - S3-critical runtime paths (`storage.service`, `media.service`, `metadata.service`, `download.service`, `utils/file.ts`) were re-audited; S3 detection and stream/copy behaviors remain present.

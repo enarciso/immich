@@ -29,3 +29,5 @@ vite.config.js.timestamp-*
 .pnpm-store
 .devcontainer/library
 .devcontainer/.env*
+
+docs/agent/
