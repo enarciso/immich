@@ -440,6 +440,86 @@ describe(StorageTemplateService.name, () => {
       expect(mocks.user.getList).toHaveBeenCalled();
     });
 
+    it('should handle an asset with a destination locked in move history', async () => {
+      const asset = assetStub.storageAsset();
+      const oldPath = asset.originalPath;
+      const newPath = `/data/library/user-id/2022/2022-06-19/${asset.originalFileName}`;
+      const newPath2 = newPath.replace('.jpg', '+1.jpg');
+
+      mocks.assetJob.streamForStorageTemplateJob.mockReturnValue(makeStream([asset]));
+      mocks.user.getList.mockResolvedValue([userStub.user1]);
+      mocks.move.create.mockResolvedValue({
+        id: '123',
+        entityId: asset.id,
+        pathType: AssetPathType.Original,
+        oldPath,
+        newPath: newPath2,
+      });
+
+      mocks.storage.checkFileExists.mockResolvedValue(false);
+      mocks.move.getByNewPath.mockResolvedValueOnce({
+        id: 'other-move',
+        entityId: 'other-asset-id',
+        pathType: AssetPathType.Original,
+        oldPath: '/data/library/user-id/2022/2022-06-19/old-name.jpg',
+        newPath,
+      });
+      mocks.move.getByNewPath.mockResolvedValueOnce(undefined);
+
+      await sut.handleMigration();
+
+      expect(mocks.assetJob.streamForStorageTemplateJob).toHaveBeenCalled();
+      expect(mocks.storage.checkFileExists).toHaveBeenCalledTimes(2);
+      expect(mocks.move.getByNewPath).toHaveBeenCalledTimes(2);
+      expect(mocks.move.create).toHaveBeenCalledWith({
+        entityId: asset.id,
+        pathType: AssetPathType.Original,
+        oldPath,
+        newPath: newPath2,
+      });
+      expect(mocks.asset.update).toHaveBeenCalledWith({ id: asset.id, originalPath: newPath2 });
+      expect(mocks.user.getList).toHaveBeenCalled();
+    });
+
+    it('should ignore move-history lock when it belongs to the same asset', async () => {
+      const asset = assetStub.storageAsset();
+      const oldPath = asset.originalPath;
+      const newPath = `/data/library/user-id/2022/2022-06-19/${asset.originalFileName}`;
+
+      mocks.assetJob.streamForStorageTemplateJob.mockReturnValue(makeStream([asset]));
+      mocks.user.getList.mockResolvedValue([userStub.user1]);
+      mocks.move.create.mockResolvedValue({
+        id: '123',
+        entityId: asset.id,
+        pathType: AssetPathType.Original,
+        oldPath,
+        newPath,
+      });
+
+      mocks.storage.checkFileExists.mockResolvedValue(false);
+      mocks.move.getByNewPath.mockResolvedValue({
+        id: 'existing-move',
+        entityId: asset.id,
+        pathType: AssetPathType.Original,
+        oldPath,
+        newPath,
+      });
+
+      await sut.handleMigration();
+
+      expect(mocks.assetJob.streamForStorageTemplateJob).toHaveBeenCalled();
+      expect(mocks.storage.checkFileExists).toHaveBeenCalledTimes(1);
+      expect(mocks.move.getByNewPath).toHaveBeenCalledTimes(1);
+      expect(mocks.move.create).toHaveBeenCalledWith({
+        entityId: asset.id,
+        pathType: AssetPathType.Original,
+        oldPath,
+        newPath,
+      });
+      expect(mocks.asset.update).toHaveBeenCalledWith({ id: asset.id, originalPath: newPath });
+      expect(mocks.user.getList).toHaveBeenCalled();
+    });
+
     it('should skip when an asset already matches the template', async () => {
       const asset = assetStub.storageAsset({ originalPath: '/data/library/user-id/2023/2023-02-23/asset-id.jpg' });
 

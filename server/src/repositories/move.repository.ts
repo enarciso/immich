@@ -24,6 +24,10 @@ export class MoveRepository {
       .executeTakeFirst();
   }
 
+  getByNewPath(newPath: string) {
+    return this.db.selectFrom('move_history').selectAll().where('newPath', '=', newPath).executeTakeFirst();
+  }
+
   update(id: string, entity: Updateable<MoveTable>) {
     return this.db
       .updateTable('move_history')

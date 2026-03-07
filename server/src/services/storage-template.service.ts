@@ -370,8 +370,15 @@ export class StorageTemplateService extends BaseService {
       let duplicateCount = 0;
 
       while (true) {
-        const exists = await this.storageRepository.checkFileExists(destination);
-        if (!exists) {
+        const [exists, move] = await Promise.all([
+          this.storageRepository.checkFileExists(destination),
+          this.moveRepository.getByNewPath(destination),
+        ]);
+
+        const isLockedByAnotherAsset =
+          !!move && (move.entityId !== asset.id || move.pathType !== AssetPathType.Original);
+
+        if (!exists && !isLockedByAnotherAsset) {
           break;
         }
 

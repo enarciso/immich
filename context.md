@@ -288,3 +288,15 @@ Next steps:
   - `pnpm --filter immich run check` (fails on pre-existing `download.service.spec.ts` mock typing: `ImmichZipStream` missing `addStream`).
 - Notes:
   - S3-critical runtime paths (`storage.service`, `media.service`, `metadata.service`, `download.service`, `utils/file.ts`) were re-audited; S3 detection and stream/copy behaviors remain present.
+
+2026-03-07 — Fix storage-template move-history path-lock collision
+
+- Production symptom: `StorageTemplateService` failed with Postgres `23505` (`UQ_newPath`) while inserting into `move_history` for a templated destination like `.../IMG_1813+2.mp4`.
+- Root cause: `StorageTemplateService.getTemplatePath()` only checked `storage.checkFileExists(destination)` before choosing a destination, but did not consider existing reserved destinations in `move_history.newPath`.
+- Change:
+  - `server/src/repositories/move.repository.ts`: added `getByNewPath(newPath)` query helper.
+  - `server/src/services/storage-template.service.ts`: destination de-duplication loop now checks both file existence and move-history lock; paths locked by other assets are treated as occupied.
+  - Same-asset/original-path lock is exempt so retries do not force unnecessary suffixes.
+- Tests:
+  - Added regression tests in `server/src/services/storage-template.service.spec.ts` for locked destination by another asset and by the same asset.
+  - Command: `pnpm --filter immich exec vitest run --config test/vitest.config.mjs src/services/storage-template.service.spec.ts` (PASS, 31 tests).
