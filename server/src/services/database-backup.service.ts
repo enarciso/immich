@@ -21,6 +21,7 @@ import { ProcessRepository } from 'src/repositories/process.repository';
 import { StorageRepository } from 'src/repositories/storage.repository';
 import { SystemMetadataRepository } from 'src/repositories/system-metadata.repository';
 import { S3AppStorageBackend } from 'src/storage/s3-backend';
+import { UserRepository } from 'src/repositories/user.repository';
 import { getConfig } from 'src/utils/config';
 import {
   findDatabaseBackupVersion,
@@ -41,6 +42,7 @@ export class DatabaseBackupService {
     private readonly systemMetadataRepository: SystemMetadataRepository,
     private readonly processRepository: ProcessRepository,
     private readonly databaseRepository: DatabaseRepository,
+    private readonly userRepository: UserRepository,
     @Optional()
     private readonly cronRepository: CronRepository,
     @Optional()
@@ -208,7 +210,8 @@ export class DatabaseBackupService {
         // remove known bad parameters
         parsedUrl.searchParams.delete('uselibpqcompat');
 
-        databaseUsername = parsedUrl.username;
+        databaseUsername = parsedUrl.username || parsedUrl.searchParams.get('user');
+
         url = parsedUrl.toString();
       }
 
@@ -374,6 +377,7 @@ export class DatabaseBackupService {
     const files = this.isS3Path(backupsFolder, s3)
       ? await this.requireS3(s3).list(backupsFolder)
       : await this.storageRepository.readdir(backupsFolder);
+    const timezone = DateTime.local().zoneName;
 
     const validFiles = files
       .filter((fn) => isValidDatabaseBackupName(fn))
@@ -385,11 +389,11 @@ export class DatabaseBackupService {
         const filePath = this.joinPaths(backupsFolder, filename);
         if (this.isS3Path(filePath, s3)) {
           const head = await this.requireS3(s3).head(filePath);
-          return { filename, filesize: Number(head.size || 0) };
+          return { filename, filesize: Number(head.size || 0), timezone };
         }
 
         const stats = await this.storageRepository.stat(filePath);
-        return { filename, filesize: stats.size };
+        return { filename, filesize: stats.size, timezone };
       }),
     );
 
@@ -523,7 +527,14 @@ export class DatabaseBackupService {
 
       try {
         progressCb?.('migrations', 0.9);
+
         await this.databaseRepository.runMigrations();
+
+        const hasAdmin = await this.userRepository.hasAdmin();
+        if (!hasAdmin) {
+          throw new Error('Server health check failed, no admin exists.');
+        }
+
         await this.maintenanceHealthRepository.checkApiHealth();
       } catch (error) {
         progressCb?.('rollback', 0);

@@ -46,13 +46,15 @@ export class CronRepository {
       true,
     );
 
-    this.schedulerRegistry.addCronJob(name, job);
+    // `@nestjs/schedule` currently types SchedulerRegistry with its own `cron` dependency version.
+    // Bridge the type here so our direct `cron` import does not fail on private-type mismatches.
+    this.schedulerRegistry.addCronJob(name, job as unknown as Parameters<SchedulerRegistry['addCronJob']>[1]);
   }
 
   update({ name, expression, start }: CronUpdate): void {
     const job = this.schedulerRegistry.getCronJob(name);
     if (expression) {
-      job.setTime(new CronTime(expression));
+      job.setTime(new CronTime(expression) as unknown as Parameters<typeof job.setTime>[0]);
     }
     if (start !== undefined) {
       if (start) {

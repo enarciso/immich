@@ -300,3 +300,115 @@ Next steps:
 - Tests:
   - Added regression tests in `server/src/services/storage-template.service.spec.ts` for locked destination by another asset and by the same asset.
   - Command: `pnpm --filter immich exec vitest run --config test/vitest.config.mjs src/services/storage-template.service.spec.ts` (PASS, 31 tests).
+
+2026-04-21 — Workspace + S3 feature deep analysis (no code changes)
+
+- Completed required boot sequence: reviewed `AGENTS.md`, `context.md`, and `docs/agent/{STATE,DECISIONS,TASKS,CHANGELOG}.md`.
+- Audited workspace architecture and branch graph:
+  - current branch `main` is clean
+  - `feat/S3Support` exists locally and is ancestor-merged into `main`
+  - fork-vs-upstream history reviewed with focus on S3 deltas.
+- Reconstructed S3 feature lineage:
+  - `c658340d9` initial S3 scaffolding
+  - `09fd9d19c` first functional S3 pass across server/storage/media/config/docker/docs
+  - `dd3ecac27` S3 database dump/doc hardening
+  - later hardening commits including backup list fix (`f8b6104b5`), staged media outputs (`1b86b8f3e`), and HTTP Range playback (`ee49c105b`).
+- Verified current end-to-end S3 behavior in code:
+  - Uploads stream directly to S3 with checksuming (`server/src/middleware/file-upload.interceptor.ts`)
+  - StorageCore move path uses copy/verify/delete semantics for S3 (`server/src/cores/storage.core.ts`)
+  - Media + metadata jobs stage S3 inputs/outputs locally for ffmpeg/sharp/exif workflows (`server/src/services/media.service.ts`, `server/src/services/metadata.service.ts`)
+  - Downloads and playback support S3 streams and HTTP byte ranges (`server/src/services/download.service.ts`, `server/src/utils/file.ts`)
+  - DB backups support S3 write/list/delete/restore streams (`server/src/services/database-backup.service.ts`)
+  - S3 engine derives media location and skips local mount checks (`server/src/services/storage.service.ts`).
+- Confirmed docs/env coverage for operators:
+  - `docs/docs/administration/s3-storage.md`
+  - `docs/docs/install/environment-variables.md`
+  - `docker/example.env`
+  - `docker/README.md`.
+- Notes:
+  - historical `migrate-to-s3` command was added then removed in branch history; migration path is currently documented as `aws s3 sync` workflow.
+  - no tests run this session because request was analysis-only and no source code was modified.
+
+2026-04-21 — v2.7.5 upstream merge rehearsal (PR-style S3 safety review)
+
+- Reproduced user merge method in isolated worktree:
+  - `git fetch --no-tags upstream refs/tags/v2.7.5:refs/tags/build-v2.7.5`
+  - `git merge --allow-unrelated-histories build-v2.7.5`
+- Merge conflicted in key S3-sensitive services:
+  - `server/src/middleware/file-upload.interceptor.ts`
+  - `server/src/services/download.service.ts`
+  - `server/src/services/media.service.ts`
+  - `server/src/services/metadata.service.ts`
+  - `server/src/services/database-backup.service.ts`
+- Findings:
+  - Upstream variants of upload/download/media/metadata remove custom S3 flow currently required by this fork.
+  - `database-backup` needs hybrid merge: keep S3 path logic while adopting upstream response changes (`timezone` field).
+  - Upstream introduces important behavior shifts that must be preserved while porting S3 patches (`DownloadArchiveDto.edited`, media transparent-file semantics + encoded-video file model, metadata `Tasks` orchestration).
+- Non-S3 conflicts also present (`pnpm-lock.yaml`, `.gitignore`, `server/tsconfig.json`, workflow delete/modify), but S3-critical files are the primary merge risk.
+- No merge-resolving edits applied in rehearsal worktree; produced a merge plan + verification matrix for safe execution.
+
+2026-04-21 — v2.7.5 merge conflict resolution (S3 preserved)
+
+- Resolved all merge conflicts in the live merge tree (no remaining unmerged files).
+- S3-critical files resolved with upstream behavior retained:
+  - `server/src/middleware/file-upload.interceptor.ts` (local stream + S3 upload stream paths)
+  - `server/src/services/download.service.ts` (edited/original path logic + S3 zip streaming)
+  - `server/src/services/media.service.ts` (S3 staging retained; duplicate decode regression removed; encoded video upsert kept)
+  - `server/src/services/metadata.service.ts` (upstream `Tasks` + S3 staged reads retained)
+  - `server/src/services/database-backup.service.ts` (S3 list/read/write/delete + timezone list field)
+- Non-S3 conflicts resolved:
+  - `.gitignore`
+  - `server/tsconfig.json`
+  - `.github/workflows/release-pr.yml` (upstream deletion retained)
+  - `pnpm-lock.yaml` regenerated via `corepack pnpm -r --filter '!documentation' install --lockfile-only`.
+- Test adjustments for merged contracts:
+  - `server/src/services/database-backup.service.spec.ts` updated for `timezone` in S3 list response.
+  - `server/src/services/download.service.spec.ts` zip mocks updated with `addStream`.
+- Validation:
+  - PASS: `corepack pnpm --filter immich exec vitest run --config test/vitest.config.mjs src/services/database-backup.service.spec.ts src/services/download.service.spec.ts src/services/media.service.spec.ts src/services/metadata.service.spec.ts src/cores/storage.core.spec.ts`
+  - FAIL (pre-existing outside conflict scope): `corepack pnpm --filter immich run check` still fails in:
+    - `src/repositories/cron.repository.ts` (cron package type-version mismatch)
+    - `src/services/storage-template.service.spec.ts` (`assetStub` symbol missing).
+
+2026-04-21 — Fix Docker prod build failure (cron type mismatch)
+
+- Build failure reproduced from compose logs at server Dockerfile step: `pnpm --filter immich --frozen-lockfile build`.
+- Root cause: TS type incompatibility between two cron versions loaded in type space (`cron@4.4.0` direct and `cron@4.3.5` via `@nestjs/schedule`) in `CronRepository`.
+- Code fix:
+  - `server/src/repositories/cron.repository.ts`
+  - Added explicit `unknown` bridge casts at `addCronJob` and `setTime` call sites to avoid private-field nominal type conflicts.
+- Validation:
+  - PASS: `corepack pnpm --filter immich run build` (in `server/`).
+
+2026-04-21 — Fix S3 upload corruption causing thumbnail decode failures
+
+- Symptom from runtime logs: newly uploaded images failed thumbnail generation with `AssetGenerateThumbnails` -> `MediaRepository.decodeImage` (`sharp`: "Input file contains unsupported image format").
+- Root cause: `server/src/middleware/file-upload.interceptor.ts` attached `file.stream.on('data', ...)` before async `s3.writeStream(path)` resolved; this can switch the readable to flowing mode and consume/drop initial bytes before the pipeline is connected.
+- Fix applied:
+  - Replaced out-of-band `data` listener accounting with an inline `Transform` stage that tracks checksum + size while forwarding bytes.
+  - Wired that transform into both S3 and local upload pipelines, preserving behavior but preventing pre-pipeline drain.
+- Validation:
+  - PASS: `corepack pnpm --filter immich run build`
+- Follow-up:
+  - Rebuild/restart server image and re-test image uploads with S3 enabled.
+  - Requeue failed thumbnail jobs for affected assets once deployed.
+
+2026-04-21 — Fix S3 thumbnail "Input file is missing" on upload
+
+- Symptom from runtime logs after prior upload fix:
+  - `AssetGenerateThumbnails` failed with sharp error:
+  - `Input file is missing: s3://<bucket>/<prefix>/library/...png`
+- Root cause:
+  - In `MediaService.extractOriginalImage`, transparency metadata probe still called:
+    - `this.mediaRepository.getImageMetadata(asset.originalPath)`
+  - For S3 engine, `asset.originalPath` can be `s3://...`, which sharp cannot open directly.
+  - This path should use already-staged local `sourcePath` (same input used for decode).
+- Fix applied:
+  - `server/src/services/media.service.ts`:
+    - `getImageMetadata(asset.originalPath)` -> `getImageMetadata(sourcePath)`.
+- Validation:
+  - PASS: `corepack pnpm --filter immich run build`
+  - PASS: `corepack pnpm --filter immich exec vitest run --config test/vitest.config.mjs src/services/media.service.spec.ts` (192 passed)
+- Follow-up:
+  - Rebuild/restart `immich-server` image and retry image upload with S3 enabled.
+  - Requeue failed thumbnail jobs for already-uploaded affected assets.

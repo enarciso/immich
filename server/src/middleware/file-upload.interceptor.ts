@@ -3,20 +3,22 @@ import { PATH_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
 import { transformException } from '@nestjs/platform-express/multer/multer/multer.utils';
 import { NextFunction, RequestHandler } from 'express';
-import multer, { StorageEngine, diskStorage } from 'multer';
+import multer from 'multer';
 import { createHash, randomUUID } from 'node:crypto';
-import { PassThrough } from 'node:stream';
+import { join } from 'node:path';
+import { Transform, pipeline } from 'node:stream';
 import { Observable } from 'rxjs';
+import { StorageCore } from 'src/cores/storage.core';
 import { UploadFieldName } from 'src/dtos/asset-media.dto';
 import { RouteKey } from 'src/enum';
 import { AuthRequest } from 'src/middleware/auth.guard';
-import { LoggingRepository } from 'src/repositories/logging.repository';
 import { ConfigRepository } from 'src/repositories/config.repository';
+import { LoggingRepository } from 'src/repositories/logging.repository';
+import { StorageRepository } from 'src/repositories/storage.repository';
+import { S3AppStorageBackend } from 'src/storage/s3-backend';
 import { AssetMediaService } from 'src/services/asset-media.service';
-import { CryptoRepository } from 'src/repositories/crypto.repository';
 import { ImmichFile, UploadFile, UploadFiles } from 'src/types';
 import { asUploadRequest, mapToUploadFile } from 'src/utils/asset.util';
-import { S3AppStorageBackend } from 'src/storage/s3-backend';
 
 export function getFile(files: UploadFiles, property: 'assetData' | 'sidecarData') {
   const file = files[property]?.[0];
@@ -30,8 +32,6 @@ export function getFiles(files: UploadFiles) {
   };
 }
 
-type DiskStorageCallback = (error: Error | null, result: string) => void;
-
 type ImmichMulterFile = Express.Multer.File & { uuid: string };
 
 interface Callback<T> {
@@ -39,35 +39,23 @@ interface Callback<T> {
   (error: null, result: T): void;
 }
 
-const callbackify = <T>(target: (...arguments_: any[]) => T, callback: Callback<T>) => {
-  try {
-    return callback(null, target());
-  } catch (error: Error | any) {
-    return callback(error);
-  }
-};
-
 @Injectable()
 export class FileUploadInterceptor implements NestInterceptor {
   private handlers: {
     userProfile: RequestHandler;
     assetUpload: RequestHandler;
   };
-  private defaultStorage: StorageEngine;
+
+  private s3: S3AppStorageBackend | null | undefined;
 
   constructor(
     private reflect: Reflector,
     private assetService: AssetMediaService,
+    private storageRepository: StorageRepository,
     private logger: LoggingRepository,
     private configRepository: ConfigRepository,
-    private cryptoRepository: CryptoRepository,
   ) {
     this.logger.setContext(FileUploadInterceptor.name);
-
-    this.defaultStorage = diskStorage({
-      filename: this.filename.bind(this),
-      destination: this.destination.bind(this),
-    });
 
     const instance = multer({
       fileFilter: this.fileFilter.bind(this),
@@ -104,121 +92,148 @@ export class FileUploadInterceptor implements NestInterceptor {
     return next.handle();
   }
 
+  private getS3(): S3AppStorageBackend | null {
+    if (this.s3 !== undefined) {
+      return this.s3;
+    }
+
+    const env = this.configRepository.getEnv();
+    const s3 = env.storage.s3;
+
+    if (env.storage.engine === 's3' && s3?.bucket) {
+      this.s3 = new S3AppStorageBackend({
+        endpoint: s3.endpoint,
+        region: s3.region || 'us-east-1',
+        bucket: s3.bucket,
+        prefix: s3.prefix,
+        forcePathStyle: s3.forcePathStyle,
+        useAccelerate: s3.useAccelerate,
+        accessKeyId: s3.accessKeyId,
+        secretAccessKey: s3.secretAccessKey,
+        sse: s3.sse as any,
+        sseKmsKeyId: s3.sseKmsKeyId,
+      });
+    } else {
+      this.s3 = null;
+    }
+
+    return this.s3;
+  }
+
+  private joinUploadPath(folder: string, filename: string): string {
+    if (folder.startsWith('s3://')) {
+      return `${folder.replace(/\/+$/g, '')}/${filename.replace(/^\/+/g, '')}`;
+    }
+
+    return join(folder, filename);
+  }
+
+  private isS3Path(path: string): boolean {
+    const s3 = this.getS3();
+    return path.startsWith('s3://') || (!!s3 && StorageCore.isImmichPath(path));
+  }
+
   private fileFilter(request: AuthRequest, file: Express.Multer.File, callback: multer.FileFilterCallback) {
-    return callbackify(() => this.assetService.canUploadFile(asUploadRequest(request, file)), callback);
-  }
-
-  private filename(request: AuthRequest, file: Express.Multer.File, callback: DiskStorageCallback) {
-    return callbackify(
-      () => this.assetService.getUploadFilename(asUploadRequest(request, file)),
-      callback as Callback<string>,
-    );
-  }
-
-  private destination(request: AuthRequest, file: Express.Multer.File, callback: DiskStorageCallback) {
-    return callbackify(
-      () => this.assetService.getUploadFolder(asUploadRequest(request, file)),
-      callback as Callback<string>,
-    );
+    try {
+      callback(null, this.assetService.canUploadFile(asUploadRequest(request, file)));
+    } catch (error: Error | any) {
+      callback(error);
+    }
   }
 
   private handleFile(request: AuthRequest, file: Express.Multer.File, callback: Callback<Partial<ImmichFile>>) {
-    (file as ImmichMulterFile).uuid = randomUUID();
-
     request.on('error', (error) => {
       this.logger.warn('Request error while uploading file, cleaning up', error);
       this.assetService.onUploadError(request, file).catch(this.logger.error);
     });
 
-    const env = this.configRepository.getEnv();
-    const useS3 = (env.storage.engine || 'local') === 's3' && !!env.storage.s3?.bucket;
+    try {
+      (file as ImmichMulterFile).uuid = randomUUID();
 
-    if (!useS3) {
-      const isAssetData = file.fieldname === UploadFieldName.ASSET_DATA;
-      this.defaultStorage._handleFile(request, file, (err, result: any) => {
-        if (err) return callback(err);
-        if (!isAssetData) {
-          return callback(null, result as Partial<ImmichFile>);
-        }
-        // compute checksum for local uploads after file is written
-        this.cryptoRepository
-          .hashFile(result.path)
-          .then((checksum) => callback(null, { ...(result as any), checksum } as Partial<ImmichFile>))
-          .catch((error) => callback(error as Error));
+      const uploadRequest = asUploadRequest(request, file);
+      const path = this.joinUploadPath(
+        this.assetService.getUploadFolder(uploadRequest),
+        this.assetService.getUploadFilename(uploadRequest),
+      );
+      const hash = file.fieldname === UploadFieldName.ASSET_DATA ? createHash('sha1') : null;
+      let size = 0;
+      const accountingStream = new Transform({
+        transform: (chunk: Buffer, _encoding, next) => {
+          hash?.update(chunk);
+          size += chunk.length;
+          next(null, chunk);
+        },
       });
+
+      if (this.isS3Path(path)) {
+        const s3 = this.getS3();
+        if (!s3) {
+          return callback(new Error('S3 storage is not configured'));
+        }
+
+        s3
+          .writeStream(path)
+          .then(({ stream, done }) => {
+            pipeline(file.stream, accountingStream, stream, async (error) => {
+              if (error) {
+                hash?.destroy();
+                return callback(error);
+              }
+
+              try {
+                await done();
+                callback(null, {
+                  path,
+                  size,
+                  checksum: hash?.digest(),
+                });
+              } catch (error: Error | any) {
+                hash?.destroy();
+                callback(error);
+              }
+            });
+          })
+          .catch((error) => callback(error));
+        return;
+      }
+
+      const writeStream = this.storageRepository.createWriteStream(path);
+      pipeline(file.stream, accountingStream, writeStream, (error) => {
+        if (error) {
+          hash?.destroy();
+          return callback(error);
+        }
+
+        callback(null, {
+          path,
+          size,
+          checksum: hash?.digest(),
+        });
+      });
+    } catch (error: Error | any) {
+      callback(error);
+    }
+  }
+
+  private removeFile(_request: AuthRequest, file: Express.Multer.File, callback: (error: Error | null) => void) {
+    if (this.isS3Path(file.path)) {
+      const s3 = this.getS3();
+      if (!s3) {
+        callback(null);
+        return;
+      }
+
+      s3
+        .deleteObject(file.path)
+        .then(() => callback(null))
+        .catch(callback);
       return;
     }
 
-    // Stream directly to S3 and compute checksum
-    const uploadReq = asUploadRequest(request, file);
-    const uploadFilename = this.assetService.getUploadFilename(uploadReq);
-    const uploadFolder = this.assetService.getUploadFolder(uploadReq);
-    const uploadPath = `${uploadFolder}/${uploadFilename}`;
-
-    const s3c = env.storage.s3!;
-    const s3 = new S3AppStorageBackend({
-      endpoint: s3c.endpoint,
-      region: s3c.region || 'us-east-1',
-      bucket: s3c.bucket!,
-      prefix: s3c.prefix,
-      forcePathStyle: s3c.forcePathStyle,
-      useAccelerate: s3c.useAccelerate,
-      accessKeyId: s3c.accessKeyId,
-      secretAccessKey: s3c.secretAccessKey,
-      sse: s3c.sse as any,
-      sseKmsKeyId: s3c.sseKmsKeyId,
-    });
-
-    const hash = createHash('sha1');
-    let bytes = 0;
-    const monitor = new PassThrough();
-    monitor.on('data', (chunk) => {
-      hash.update(chunk as Buffer);
-      bytes += (chunk as Buffer).length;
-    });
-
-    s3
-      .writeStream(uploadPath)
-      .then(({ stream, done }) => {
-        file.stream.pipe(monitor).pipe(stream);
-        stream.on('error', (err) => {
-          this.logger.error('S3 upload stream error', { path: uploadPath, error: (err as Error)?.message || err });
-          hash.destroy();
-          callback(err as Error);
-        });
-        stream.on('finish', async () => {
-          try {
-            await done();
-            const checksum = hash.digest();
-            callback(null, { path: uploadPath, size: bytes, checksum } as Partial<ImmichFile>);
-          } catch (err: any) {
-            this.logger.error('S3 upload finalize error', { path: uploadPath, error: err?.message || err });
-            hash.destroy();
-            callback(err as Error);
-          }
-        });
-      })
-      .catch((err) => {
-        this.logger.error('Failed to start S3 upload stream', { path: uploadPath, error: (err as Error)?.message || err });
-        callback(err as Error);
-      });
-  }
-
-  private removeFile(request: AuthRequest, file: Express.Multer.File, callback: (error: Error | null) => void) {
-    this.defaultStorage._removeFile(request, file, callback);
-  }
-
-  private isAssetUploadFile(file: Express.Multer.File) {
-    switch (file.fieldname as UploadFieldName) {
-      case UploadFieldName.ASSET_DATA: {
-        return true;
-      }
-      case UploadFieldName.SIDECAR_DATA: {
-        return true;
-      }
-    }
-
-    return false;
+    this.storageRepository
+      .unlink(file.path)
+      .then(() => callback(null))
+      .catch(callback);
   }
 
   private getHandler(route: RouteKey) {
