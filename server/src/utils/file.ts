@@ -1,4 +1,4 @@
-import { HttpException, StreamableFile } from '@nestjs/common';
+import { HttpException, NotFoundException, StreamableFile } from '@nestjs/common';
 import { NextFunction, Response } from 'express';
 import { access, constants } from 'node:fs/promises';
 import { basename, extname } from 'node:path';
@@ -145,8 +145,7 @@ export const sendFile = async (
       logger.error('Unable to send file', { path: file?.path, error: error?.message || error, stack: error?.stack });
     }
 
-    res.header('Cache-Control', 'none');
-    next(error);
+    next(new NotFoundException());
   }
 };
 

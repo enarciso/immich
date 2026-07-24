@@ -321,6 +321,59 @@ describe(StorageTemplateService.name, () => {
       });
     });
 
+    it('should render storage datetime tokens in server timezone to preserve chronological filename ordering across time zones', async () => {
+      const user = UserFactory.create();
+      const assetBerlin = AssetFactory.from({
+        fileCreatedAt: new Date('2025-12-02T14:00:00.000Z'),
+        originalFileName: 'A.jpg',
+      })
+        .owner(user)
+        .exif({ timeZone: 'Europe/Berlin' })
+        .build();
+      const assetLondon = AssetFactory.from({
+        fileCreatedAt: new Date('2025-12-02T14:55:00.000Z'),
+        originalFileName: 'B.jpg',
+      })
+        .owner(user)
+        .exif({ timeZone: 'Europe/London' })
+        .build();
+      const config = structuredClone(defaults);
+      config.storageTemplate.template = '{{y}}{{MM}}{{dd}}_{{HH}}{{mm}}{{ss}}/{{filename}}';
+      sut.onConfigInit({ newConfig: config });
+
+      mocks.user.get.mockResolvedValue(user);
+      mocks.assetJob.getForStorageTemplateJob.mockResolvedValueOnce(getForStorageTemplate(assetBerlin));
+      mocks.assetJob.getForStorageTemplateJob.mockResolvedValueOnce(getForStorageTemplate(assetLondon));
+
+      await expect(sut.handleMigrationSingle({ id: assetBerlin.id })).resolves.toBe(JobStatus.Success);
+      await expect(sut.handleMigrationSingle({ id: assetLondon.id })).resolves.toBe(JobStatus.Success);
+
+      const formatStorageDateTime = (date: Date) => {
+        const year = date.getFullYear().toString();
+        const month = (date.getMonth() + 1).toString().padStart(2, '0');
+        const day = date.getDate().toString().padStart(2, '0');
+        const hour = date.getHours().toString().padStart(2, '0');
+        const minute = date.getMinutes().toString().padStart(2, '0');
+        const second = date.getSeconds().toString().padStart(2, '0');
+        return `${year}${month}${day}_${hour}${minute}${second}`;
+      };
+
+      expect(mocks.move.create).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          entityId: assetBerlin.id,
+          newPath: `/data/library/${user.id}/${formatStorageDateTime(assetBerlin.fileCreatedAt)}/A.jpg`,
+        }),
+      );
+      expect(mocks.move.create).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          entityId: assetLondon.id,
+          newPath: `/data/library/${user.id}/${formatStorageDateTime(assetLondon.fileCreatedAt)}/B.jpg`,
+        }),
+      );
+    });
+
     it('should migrate previously failed move from original path when it still exists', async () => {
       const user = UserFactory.create();
       const asset = AssetFactory.from({
@@ -542,12 +595,15 @@ describe(StorageTemplateService.name, () => {
     });
 
     it('should handle an asset with a destination locked in move history', async () => {
-      const asset = assetStub.storageAsset();
+      const asset = AssetFactory.from({ fileCreatedAt: new Date('2022-06-19T23:41:36.910Z') })
+        .owner(UserFactory.from({ id: 'user-id' }).build())
+        .exif()
+        .build();
       const oldPath = asset.originalPath;
       const newPath = `/data/library/user-id/2022/2022-06-19/${asset.originalFileName}`;
       const newPath2 = newPath.replace('.jpg', '+1.jpg');
 
-      mocks.assetJob.streamForStorageTemplateJob.mockReturnValue(makeStream([asset]));
+      mocks.assetJob.streamForStorageTemplateJob.mockReturnValue(makeStream([getForStorageTemplate(asset)]));
       mocks.user.getList.mockResolvedValue([userStub.user1]);
       mocks.move.create.mockResolvedValue({
         id: '123',
@@ -583,11 +639,14 @@ describe(StorageTemplateService.name, () => {
     });
 
     it('should ignore move-history lock when it belongs to the same asset', async () => {
-      const asset = assetStub.storageAsset();
+      const asset = AssetFactory.from({ fileCreatedAt: new Date('2022-06-19T23:41:36.910Z') })
+        .owner(UserFactory.from({ id: 'user-id' }).build())
+        .exif()
+        .build();
       const oldPath = asset.originalPath;
       const newPath = `/data/library/user-id/2022/2022-06-19/${asset.originalFileName}`;
 
-      mocks.assetJob.streamForStorageTemplateJob.mockReturnValue(makeStream([asset]));
+      mocks.assetJob.streamForStorageTemplateJob.mockReturnValue(makeStream([getForStorageTemplate(asset)]));
       mocks.user.getList.mockResolvedValue([userStub.user1]);
       mocks.move.create.mockResolvedValue({
         id: '123',
