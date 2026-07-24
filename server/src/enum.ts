@@ -314,6 +314,7 @@ export enum StorageFolder {
 
 export enum SystemMetadataKey {
   MediaLocation = 'MediaLocation',
+  StorageLayout = 'storage-layout',
   ReverseGeocodingState = 'reverse-geocoding-state',
   FacialRecognitionState = 'facial-recognition-state',
   MemoriesState = 'memories-state',

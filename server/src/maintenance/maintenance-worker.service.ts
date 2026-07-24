@@ -13,7 +13,7 @@ import {
   SetMaintenanceModeDto,
 } from 'src/dtos/maintenance.dto';
 import { ServerConfigDto, ServerPingResponse, ServerVersionResponseDto } from 'src/dtos/server.dto';
-import { DatabaseLock, ImmichCookie, MaintenanceAction, SystemMetadataKey } from 'src/enum';
+import { DatabaseLock, ImmichCookie, MaintenanceAction, StorageFolder, SystemMetadataKey } from 'src/enum';
 import { MaintenanceHealthRepository } from 'src/maintenance/maintenance-health.repository';
 import { MaintenanceWebsocketRepository } from 'src/maintenance/maintenance-websocket.repository';
 import { AppRepository } from 'src/repositories/app.repository';
@@ -28,7 +28,7 @@ import { type BaseService as _BaseService } from 'src/services/base.service';
 import { DatabaseBackupService } from 'src/services/database-backup.service';
 import { type ServerService as _ServerService } from 'src/services/server.service';
 import { type VersionService as _VersionService } from 'src/services/version.service';
-import { MaintenanceModeState } from 'src/types';
+import { MaintenanceModeState, StorageLayout } from 'src/types';
 import { getConfig } from 'src/utils/config';
 import { createMaintenanceLoginUrl, detectPriorInstall } from 'src/utils/maintenance';
 import { getExternalDomain } from 'src/utils/misc';
@@ -64,6 +64,36 @@ export class MaintenanceWorkerService {
     this.#status = status;
   }
 
+  private buildS3Location(bucket: string, prefix?: string): string {
+    const normalizedPrefix = prefix?.replace(/^\/+|\/+$/g, '');
+    return normalizedPrefix ? `s3://${bucket}/${normalizedPrefix}` : `s3://${bucket}`;
+  }
+
+  private getS3FolderPrefix(folder: StorageFolder): string | undefined {
+    const s3 = this.configRepository.getEnv().storage.s3;
+    if (!s3) {
+      return;
+    }
+
+    switch (folder) {
+      case StorageFolder.Thumbnails: {
+        return s3.thumbPrefix;
+      }
+      case StorageFolder.EncodedVideo: {
+        return s3.encodedVideoPrefix;
+      }
+      case StorageFolder.Profile: {
+        return s3.profilePrefix;
+      }
+      case StorageFolder.Backups: {
+        return s3.backupPrefix;
+      }
+      default: {
+        return;
+      }
+    }
+  }
+
   async init() {
     const state = (await this.systemMetadataRepository.get(
       SystemMetadataKey.MaintenanceMode,
@@ -75,7 +105,7 @@ export class MaintenanceWorkerService {
       action: state.action?.action ?? MaintenanceAction.Start,
     };
 
-    StorageCore.setMediaLocation(this.detectMediaLocation());
+    StorageCore.setStorageLayout(this.detectStorageLayout());
 
     this.maintenanceWebsocketRepository.setAuthFn(async (client) => this.authenticate(client.request.headers));
     this.maintenanceWebsocketRepository.setStatusUpdateFn((status) => (this.#status = status));
@@ -167,6 +197,10 @@ export class MaintenanceWorkerService {
       return envData.storage.mediaLocation;
     }
 
+    if (envData.storage.engine === 's3' && envData.storage.s3?.bucket) {
+      return this.buildS3Location(envData.storage.s3.bucket, envData.storage.s3.prefix);
+    }
+
     const targets: string[] = [];
     const candidates = ['/data', '/usr/src/app/upload'];
 
@@ -182,6 +216,24 @@ export class MaintenanceWorkerService {
     }
 
     return '/usr/src/app/upload';
+  }
+
+  detectStorageLayout(): StorageLayout {
+    const envData = this.configRepository.getEnv();
+    const mediaLocation = this.detectMediaLocation();
+    const folders = Object.fromEntries(
+      Object.values(StorageFolder).map((folder) => {
+        const overridePrefix =
+          envData.storage.engine === 's3' && envData.storage.s3?.bucket ? this.getS3FolderPrefix(folder) : undefined;
+        const location =
+          overridePrefix && envData.storage.s3?.bucket
+            ? this.buildS3Location(envData.storage.s3.bucket, overridePrefix)
+            : StorageCore.joinPaths(mediaLocation, folder);
+        return [folder, location];
+      }),
+    ) as Record<StorageFolder, string>;
+
+    return { mediaLocation, folders };
   }
 
   private get secret() {

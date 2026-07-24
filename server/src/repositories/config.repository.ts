@@ -122,6 +122,10 @@ export interface EnvData {
       region?: string;
       bucket?: string;
       prefix?: string;
+      thumbPrefix?: string;
+      encodedVideoPrefix?: string;
+      profilePrefix?: string;
+      backupPrefix?: string;
       forcePathStyle?: boolean;
       useAccelerate?: boolean;
       accessKeyId?: string;
@@ -386,6 +390,10 @@ const getEnv = (): EnvData => {
         region: dto.S3_REGION || 'us-east-1',
         bucket: dto.S3_BUCKET,
         prefix: dto.S3_PREFIX,
+        thumbPrefix: dto.S3_THUMB_PREFIX,
+        encodedVideoPrefix: dto.S3_ENCODED_VIDEO_PREFIX,
+        profilePrefix: dto.S3_PROFILE_PREFIX,
+        backupPrefix: dto.S3_BACKUP_PREFIX,
         forcePathStyle: !!dto.S3_FORCE_PATH_STYLE,
         useAccelerate: !!dto.S3_USE_ACCELERATE,
         accessKeyId: dto.S3_ACCESS_KEY_ID,

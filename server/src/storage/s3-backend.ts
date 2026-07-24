@@ -151,6 +151,26 @@ export class S3AppStorageBackend implements IAppStorageBackend {
     return items;
   }
 
+  async listRecursive(prefixPath: string): Promise<string[]> {
+    const { bucket, key: prefixKeyRaw } = this.parseKey(prefixPath);
+    const prefixKey = prefixKeyRaw.endsWith('/') ? prefixKeyRaw : `${prefixKeyRaw}/`;
+    const items: string[] = [];
+    let ContinuationToken: string | undefined;
+    do {
+      const res = await this.client.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefixKey, ContinuationToken }));
+      for (const obj of res.Contents || []) {
+        const key = obj.Key || '';
+        if (!key || key === prefixKey) {
+          continue;
+        }
+        items.push(key.substring(prefixKey.length));
+      }
+      ContinuationToken = res.IsTruncated ? res.NextContinuationToken : undefined;
+    } while (ContinuationToken);
+
+    return items;
+  }
+
   async copyObject(srcKey: string, dstKey: string): Promise<void> {
     const src = this.parseKey(srcKey);
     const dst = this.parseKey(dstKey);

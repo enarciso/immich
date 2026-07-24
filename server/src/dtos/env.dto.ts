@@ -247,6 +247,22 @@ export class EnvDto {
 
   @IsString()
   @Optional()
+  S3_THUMB_PREFIX?: string;
+
+  @IsString()
+  @Optional()
+  S3_ENCODED_VIDEO_PREFIX?: string;
+
+  @IsString()
+  @Optional()
+  S3_PROFILE_PREFIX?: string;
+
+  @IsString()
+  @Optional()
+  S3_BACKUP_PREFIX?: string;
+
+  @IsString()
+  @Optional()
   S3_ACCESS_KEY_ID?: string;
 
   @IsString()

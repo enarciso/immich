@@ -14,6 +14,10 @@ Required variables (see example.env for full list):
 - Optional:
   - `S3_REGION=us-east-1`
   - `S3_PREFIX=<optional/path/prefix>` (folder under the bucket)
+  - `S3_THUMB_PREFIX=<optional/folder/root>` for `thumbs/`
+  - `S3_ENCODED_VIDEO_PREFIX=<optional/folder/root>` for `encoded-video/`
+  - `S3_PROFILE_PREFIX=<optional/folder/root>` for `profile/`
+  - `S3_BACKUP_PREFIX=<optional/folder/root>` for `backups/`
   - `S3_ENDPOINT=http://minio:9000` and `S3_FORCE_PATH_STYLE=true` for MinIO or path‑style endpoints
   - `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` (or use IAM)
   - `S3_USE_ACCELERATE=false` (AWS Transfer Acceleration, only if enabled on the bucket)
@@ -23,6 +27,37 @@ Notes:
 
 - Do not set `IMMICH_MEDIA_LOCATION` when using S3. Immich derives `s3://<bucket>/<prefix>` automatically.
 - When the engine is `s3`, the `/data` bind mount is optional/unused by the server.
+
+## S3 Custom Locations
+
+Immich supports the same split-folder idea described in the [Files Custom Locations](/guides/custom-locations/) guide, but for S3 this is expressed with bucket-relative prefixes instead of Docker bind mounts.
+
+- `S3_PREFIX` remains the default root for Immich-managed originals and any folder without an override.
+- `S3_THUMB_PREFIX`, `S3_ENCODED_VIDEO_PREFIX`, `S3_PROFILE_PREFIX`, and `S3_BACKUP_PREFIX` set the exact S3 root for those managed folders.
+- `upload/` and `library/` continue to live under `S3_PREFIX` so raw/original storage stays under one canonical base.
+- All prefixes share the same bucket and the same credentials.
+
+Example:
+
+```env
+IMMICH_STORAGE_ENGINE=s3
+S3_BUCKET=immich-prod
+S3_PREFIX=data
+S3_THUMB_PREFIX=cache/thumbs
+S3_ENCODED_VIDEO_PREFIX=cache/encoded-video
+S3_PROFILE_PREFIX=profiles
+S3_BACKUP_PREFIX=ops/backups
+```
+
+This layout resolves to:
+
+- originals and library content under `s3://immich-prod/data/...`
+- thumbnails under `s3://immich-prod/cache/thumbs/...`
+- transcoded videos under `s3://immich-prod/cache/encoded-video/...`
+- profile images under `s3://immich-prod/profiles/...`
+- database backups under `s3://immich-prod/ops/backups/...`
+
+When the stored layout differs from the current S3 env configuration, Immich migrates objects and rewrites managed database paths for the folders that changed.
 
 ## Migration (aws s3 sync)
 
@@ -48,6 +83,7 @@ aws s3 sync /path/to/upload s3://<bucket>/<optional-prefix>/ [--delete]
 
 - Update your environment to enable S3 (see variables above), then restart Immich.
 - On startup, Immich detects the new media location and rewrites stored paths from the previous base to `s3://<bucket>/<prefix>`.
+- If you also set any `S3_*_PREFIX` overrides, Immich migrates those managed folders to their new S3 roots at startup.
 
 3) Verify
 
@@ -81,4 +117,3 @@ Immich handles listing, retention, and cleanup in that prefix.
 ## Rolling back
 
 - Set `IMMICH_STORAGE_ENGINE=local` and restart. Immich will continue to use your local `/data` volume. If needed, you can sync back from S3 using `aws s3 sync s3://<bucket>/<prefix>/ /path/to/upload` before switching.
-

@@ -2,7 +2,7 @@
 
 This file captures durable context, decisions, and next steps so work can resume smoothly after restarts.
 
-Last updated: 2025-10-17
+Last updated: 2026-05-04
 
 Repository Map (high level)
 
@@ -412,3 +412,31 @@ Next steps:
 - Follow-up:
   - Rebuild/restart `immich-server` image and retry image upload with S3 enabled.
   - Requeue failed thumbnail jobs for already-uploaded affected assets.
+
+2026-05-04 — S3 custom locations for managed folders
+
+- Implemented S3 custom-location support aligned with the Files Custom Locations guide, using one shared bucket plus folder-specific prefixes.
+- Public env surface added:
+  - `S3_THUMB_PREFIX`
+  - `S3_ENCODED_VIDEO_PREFIX`
+  - `S3_PROFILE_PREFIX`
+  - `S3_BACKUP_PREFIX`
+- Chosen model:
+  - `S3_PREFIX` remains the default root for `upload/` and `library/`
+  - per-folder `S3_*_PREFIX` values override only the corresponding managed generated folder roots
+- Storage model changes:
+  - `StorageCore` now stores a full `StorageLayout`, not only `MediaLocation`
+  - `SystemMetadataKey.StorageLayout` persists the effective managed layout across restarts
+  - `StorageCore.isImmichPath()` now recognizes all managed S3 roots, not just the default root
+- Migration behavior:
+  - `StorageService` compares previous vs current storage layout on bootstrap
+  - changed S3 folder roots are migrated recursively object-by-object
+  - DB rewrites are folder-scoped via `DatabaseRepository.migrateStorageFolderPaths(...)`
+  - `move_history` paths are rewritten alongside managed file paths
+- Maintenance mode:
+  - `MaintenanceWorkerService` now resolves the same S3-aware storage layout as the main server bootstrap path
+- Validation:
+  - PASS: `corepack pnpm --filter immich run build`
+  - PASS: `corepack pnpm --filter immich exec vitest run --config test/vitest.config.mjs src/cores/storage.core.spec.ts src/services/storage.service.spec.ts`
+- Remaining validation gap:
+  - no live S3 smoke test was run in this pass; upload/download/backup behavior with non-default `S3_*_PREFIX` values is still only build/spec validated

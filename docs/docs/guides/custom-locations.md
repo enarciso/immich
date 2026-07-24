@@ -2,6 +2,8 @@
 
 This guide explains how to store generated and raw files with docker's volume mount in different locations.
 
+For S3 storage, use the equivalent `S3_THUMB_PREFIX`, `S3_ENCODED_VIDEO_PREFIX`, `S3_PROFILE_PREFIX`, and `S3_BACKUP_PREFIX` variables described in the [S3/MinIO Storage](/administration/s3-storage/) guide. `S3_PREFIX` remains the default root for `upload/` and `library/`.
+
 :::caution Backup
 It is important to remember to update the backup settings after following the guide to back up the new backup paths if using automatic backup tools, especially `profile/`.
 :::

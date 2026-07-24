@@ -13,6 +13,7 @@ import { StorageRepository } from 'src/repositories/storage.repository';
 import { SystemMetadataRepository } from 'src/repositories/system-metadata.repository';
 import { getAssetFile } from 'src/utils/asset.util';
 import { getConfig } from 'src/utils/config';
+import type { StorageLayout } from 'src/types';
 
 export interface MoveRequest {
   entityId: string;
@@ -32,9 +33,10 @@ export type ImagePathOptions = { fileType: AssetFileType; format: ImageFormat | 
 let instance: StorageCore | null;
 
 let mediaLocation: string | undefined;
+let folderLocations: Partial<Record<StorageFolder, string>> | undefined;
 
 export class StorageCore {
-  private static joinPaths(base: string, ...parts: string[]): string {
+  static joinPaths(base: string, ...parts: string[]): string {
     if (base.startsWith('s3://')) {
       const trim = (s: string) => s.replace(/^\/+|\/+$/g, '');
       const head = base.replace(/\/+$/g, '');
@@ -116,6 +118,21 @@ export class StorageCore {
 
   static setMediaLocation(location: string) {
     mediaLocation = location;
+    folderLocations = undefined;
+  }
+
+  static setStorageLayout(layout: StorageLayout) {
+    mediaLocation = layout.mediaLocation;
+    folderLocations = { ...layout.folders };
+  }
+
+  static getStorageLayout(): StorageLayout {
+    return {
+      mediaLocation: StorageCore.getMediaLocation(),
+      folders: Object.fromEntries(
+        Object.values(StorageFolder).map((folder) => [folder, StorageCore.getBaseFolder(folder)]),
+      ) as Record<StorageFolder, string>,
+    };
   }
 
   static getFolderLocation(folder: StorageFolder, userId: string) {
@@ -127,7 +144,7 @@ export class StorageCore {
   }
 
   static getBaseFolder(folder: StorageFolder) {
-    return this.joinPaths(StorageCore.getMediaLocation(), folder);
+    return folderLocations?.[folder] || this.joinPaths(StorageCore.getMediaLocation(), folder);
   }
 
   static getPersonThumbnailPath(person: ThumbnailPathEntity) {
@@ -155,21 +172,26 @@ export class StorageCore {
   }
 
   static isImmichPath(path: string) {
-    const base = StorageCore.getMediaLocation();
+    const managedRoots = new Set<string>([StorageCore.getMediaLocation(), ...Object.values(folderLocations || {})]);
 
-    // If media location is an S3 URI, perform a simple prefix comparison on strings
-    if (base.startsWith('s3://')) {
-      const norm = (p: string) => (p.endsWith('/') ? p : p + '/');
-      const normalizedBase = norm(base);
-      const normalizedPath = norm(path);
-      return normalizedPath.startsWith(normalizedBase);
+    for (const root of managedRoots) {
+      if (root.startsWith('s3://')) {
+        const norm = (p: string) => (p.endsWith('/') ? p : `${p}/`);
+        if (norm(path).startsWith(norm(root))) {
+          return true;
+        }
+        continue;
+      }
+
+      const resolvedPath = resolve(path);
+      const normalizedPath = resolvedPath.endsWith('/') ? resolvedPath : `${resolvedPath}/`;
+      const normalizedBase = root.endsWith('/') ? root : `${root}/`;
+      if (normalizedPath.startsWith(normalizedBase)) {
+        return true;
+      }
     }
 
-    // Default: treat both as local filesystem paths
-    const resolvedPath = resolve(path);
-    const normalizedPath = resolvedPath.endsWith('/') ? resolvedPath : resolvedPath + '/';
-    const normalizedBase = base.endsWith('/') ? base : base + '/';
-    return normalizedPath.startsWith(normalizedBase);
+    return false;
   }
 
   async moveAssetImage(asset: StorageAsset, fileType: AssetFileType, format: ImageFormat) {

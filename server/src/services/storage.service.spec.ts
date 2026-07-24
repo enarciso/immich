@@ -1,8 +1,10 @@
-import { SystemMetadataKey } from 'src/enum';
+import { StorageFolder, SystemMetadataKey } from 'src/enum';
+import { S3AppStorageBackend } from 'src/storage/s3-backend';
 import { StorageService } from 'src/services/storage.service';
 import { ImmichStartupError } from 'src/utils/misc';
 import { mockEnvData } from 'test/repositories/config.repository.mock';
 import { newTestService, ServiceMocks } from 'test/utils';
+import { vitest } from 'vitest';
 
 describe(StorageService.name, () => {
   let sut: StorageService;
@@ -10,6 +12,10 @@ describe(StorageService.name, () => {
 
   beforeEach(() => {
     ({ sut, mocks } = newTestService(StorageService));
+  });
+
+  afterEach(() => {
+    vitest.restoreAllMocks();
   });
 
   it('should work', () => {
@@ -176,6 +182,107 @@ describe(StorageService.name, () => {
       await expect(sut.onBootstrap()).resolves.toBeUndefined();
 
       expect(mocks.systemMetadata.set).not.toHaveBeenCalledWith(SystemMetadataKey.SystemFlags, expect.anything());
+    });
+
+    it('should preserve legacy local media-location migration behavior', async () => {
+      mocks.systemMetadata.get.mockImplementation(async (key) => {
+        if (key === SystemMetadataKey.SystemFlags) {
+          return { mountChecks: {} };
+        }
+
+        if (key === SystemMetadataKey.MediaLocation) {
+          return { location: '/old-data' };
+        }
+
+        return null;
+      });
+      mocks.asset.getFileSamples.mockResolvedValue([{ assetId: 'asset-1', path: '/old-data/thumbs/file.webp' }]);
+      mocks.config.getEnv.mockReturnValue(
+        mockEnvData({
+          storage: {
+            ignoreMountCheckErrors: false,
+            mediaLocation: '/new-data',
+            engine: 'local',
+          },
+        }),
+      );
+
+      await expect(sut.onBootstrap()).resolves.toBeUndefined();
+
+      expect(mocks.database.migrateFilePaths).toHaveBeenCalledWith('/old-data', '/new-data');
+      expect(mocks.database.migrateStorageFolderPaths).not.toHaveBeenCalled();
+      expect(mocks.systemMetadata.set).toHaveBeenCalledWith(SystemMetadataKey.MediaLocation, { location: '/new-data' });
+    });
+
+    it('should migrate only changed S3 managed folder roots and persist the storage layout', async () => {
+      vitest.spyOn(S3AppStorageBackend.prototype, 'listRecursive').mockResolvedValue([]);
+      mocks.systemMetadata.get.mockImplementation(async (key) => {
+        if (key === SystemMetadataKey.SystemFlags) {
+          return null;
+        }
+
+        if (key === SystemMetadataKey.MediaLocation) {
+          return { location: 's3://immich-test/data' };
+        }
+
+        if (key === SystemMetadataKey.StorageLayout) {
+          return {
+            mediaLocation: 's3://immich-test/data',
+            folders: {
+              [StorageFolder.Upload]: 's3://immich-test/data/upload',
+              [StorageFolder.Library]: 's3://immich-test/data/library',
+              [StorageFolder.EncodedVideo]: 's3://immich-test/data/encoded-video',
+              [StorageFolder.Profile]: 's3://immich-test/data/profile',
+              [StorageFolder.Thumbnails]: 's3://immich-test/data/thumbs',
+              [StorageFolder.Backups]: 's3://immich-test/data/backups',
+            },
+          };
+        }
+
+        return null;
+      });
+      mocks.config.getEnv.mockReturnValue(
+        mockEnvData({
+          storage: {
+            ignoreMountCheckErrors: false,
+            engine: 's3',
+            s3: {
+              bucket: 'immich-test',
+              region: 'us-east-1',
+              prefix: 'data',
+              thumbPrefix: 'cache/thumbs',
+              profilePrefix: 'profiles',
+            },
+          },
+        }),
+      );
+
+      await expect(sut.onBootstrap()).resolves.toBeUndefined();
+
+      expect(mocks.database.migrateStorageFolderPaths).toHaveBeenCalledWith(
+        StorageFolder.Thumbnails,
+        's3://immich-test/data/thumbs',
+        's3://immich-test/cache/thumbs',
+      );
+      expect(mocks.database.migrateStorageFolderPaths).toHaveBeenCalledWith(
+        StorageFolder.Profile,
+        's3://immich-test/data/profile',
+        's3://immich-test/profiles',
+      );
+      expect(mocks.database.migrateStorageFolderPaths).toHaveBeenCalledTimes(2);
+      expect(mocks.database.migrateFilePaths).not.toHaveBeenCalled();
+      expect(mocks.systemMetadata.set).not.toHaveBeenCalledWith(SystemMetadataKey.MediaLocation, expect.anything());
+      expect(mocks.systemMetadata.set).toHaveBeenCalledWith(SystemMetadataKey.StorageLayout, {
+        mediaLocation: 's3://immich-test/data',
+        folders: {
+          [StorageFolder.Upload]: 's3://immich-test/data/upload',
+          [StorageFolder.Library]: 's3://immich-test/data/library',
+          [StorageFolder.EncodedVideo]: 's3://immich-test/data/encoded-video',
+          [StorageFolder.Profile]: 's3://immich-test/profiles',
+          [StorageFolder.Thumbnails]: 's3://immich-test/cache/thumbs',
+          [StorageFolder.Backups]: 's3://immich-test/data/backups',
+        },
+      });
     });
   });
 

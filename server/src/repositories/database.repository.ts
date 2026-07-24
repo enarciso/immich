@@ -17,7 +17,7 @@ import {
   VECTORS_VERSION_RANGE,
 } from 'src/constants';
 import { GenerateSql } from 'src/decorators';
-import { DatabaseExtension, DatabaseLock, VectorIndex } from 'src/enum';
+import { DatabaseExtension, DatabaseLock, StorageFolder, VectorIndex } from 'src/enum';
 import { ConfigRepository } from 'src/repositories/config.repository';
 import { LoggingRepository } from 'src/repositories/logging.repository';
 import 'src/schema'; // make sure all schema definitions are imported for schemaFromCode
@@ -448,6 +448,87 @@ export class DatabaseRepository {
         .updateTable('user')
         .set((eb) => ({ profileImagePath: eb.fn('REGEXP_REPLACE', ['profileImagePath', source, target]) }))
         .execute();
+    });
+  }
+
+  async migrateStorageFolderPaths(folder: StorageFolder, sourceFolder: string, targetFolder: string): Promise<void> {
+    if (sourceFolder.endsWith('/')) {
+      sourceFolder = sourceFolder.slice(0, -1);
+    }
+
+    if (targetFolder.endsWith('/')) {
+      targetFolder = targetFolder.slice(0, -1);
+    }
+
+    const sourceRegex = '^' + sourceFolder.replaceAll(/[-[\]{}()*+?.,\\^$|#\s]/g, String.raw`\$&`);
+
+    await this.db.transaction().execute(async (tx) => {
+      switch (folder) {
+        case StorageFolder.Upload:
+        case StorageFolder.Library: {
+          await sql`
+            UPDATE asset
+            SET "originalPath" = REGEXP_REPLACE("originalPath", ${sourceRegex}, ${targetFolder})
+            WHERE "originalPath" ~ ${sourceRegex}
+          `.execute(tx);
+
+          await sql`
+            UPDATE asset_file
+            SET "path" = REGEXP_REPLACE("path", ${sourceRegex}, ${targetFolder})
+            WHERE "path" ~ ${sourceRegex}
+          `.execute(tx);
+          break;
+        }
+
+        case StorageFolder.Thumbnails: {
+          await sql`
+            UPDATE asset_file
+            SET "path" = REGEXP_REPLACE("path", ${sourceRegex}, ${targetFolder})
+            WHERE "path" ~ ${sourceRegex}
+          `.execute(tx);
+
+          await sql`
+            UPDATE person
+            SET "thumbnailPath" = REGEXP_REPLACE("thumbnailPath", ${sourceRegex}, ${targetFolder})
+            WHERE "thumbnailPath" ~ ${sourceRegex}
+          `.execute(tx);
+          break;
+        }
+
+        case StorageFolder.EncodedVideo: {
+          await sql`
+            UPDATE asset_file
+            SET "path" = REGEXP_REPLACE("path", ${sourceRegex}, ${targetFolder})
+            WHERE "path" ~ ${sourceRegex}
+          `.execute(tx);
+          break;
+        }
+
+        case StorageFolder.Profile: {
+          await sql`
+            UPDATE "user"
+            SET "profileImagePath" = REGEXP_REPLACE("profileImagePath", ${sourceRegex}, ${targetFolder})
+            WHERE "profileImagePath" ~ ${sourceRegex}
+          `.execute(tx);
+          break;
+        }
+
+        case StorageFolder.Backups: {
+          break;
+        }
+      }
+
+      await sql`
+        UPDATE move_history
+        SET "oldPath" = REGEXP_REPLACE("oldPath", ${sourceRegex}, ${targetFolder})
+        WHERE "oldPath" ~ ${sourceRegex}
+      `.execute(tx);
+
+      await sql`
+        UPDATE move_history
+        SET "newPath" = REGEXP_REPLACE("newPath", ${sourceRegex}, ${targetFolder})
+        WHERE "newPath" ~ ${sourceRegex}
+      `.execute(tx);
     });
   }
 

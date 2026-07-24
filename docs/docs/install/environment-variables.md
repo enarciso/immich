@@ -241,6 +241,10 @@ to use a Docker secret for the password in the Redis container.
 | `S3_BUCKET`              | S3 bucket name (required when `IMMICH_STORAGE_ENGINE=s3`).                                                    |                | server     |         |
 | `S3_REGION`              | AWS region for the bucket.                                                                                    |  `us-east-1`   | server     |         |
 | `S3_PREFIX`              | Optional path prefix within the bucket (e.g., `data/immich`).                                                 |                | server     |         |
+| `S3_THUMB_PREFIX`        | Optional bucket-relative root for the managed `thumbs/` folder.                                               |                | server     |         |
+| `S3_ENCODED_VIDEO_PREFIX`| Optional bucket-relative root for the managed `encoded-video/` folder.                                        |                | server     |         |
+| `S3_PROFILE_PREFIX`      | Optional bucket-relative root for the managed `profile/` folder.                                              |                | server     |         |
+| `S3_BACKUP_PREFIX`       | Optional bucket-relative root for the managed `backups/` folder.                                              |                | server     |         |
 | `S3_ENDPOINT`            | Custom endpoint URL (e.g., MinIO `http://minio:9000`).                                                        |                | server     |         |
 | `S3_FORCE_PATH_STYLE`    | Force path‑style requests (set `true` for MinIO or path‑style endpoints).                                     |    `false`     | server     |         |
 | `S3_ACCESS_KEY_ID`       | Access key ID (omit when using IAM).                                                                          |                | server     |         |
@@ -253,4 +257,5 @@ Notes:
 
 - Do not set `IMMICH_MEDIA_LOCATION` when using S3; Immich derives `s3://<bucket>/<prefix>` automatically.
 - When using S3, the `/data` bind mount is optional/unused by the server.
+- `S3_PREFIX` remains the default root for `upload/` and `library/`; the per-folder `S3_*_PREFIX` variables override only the corresponding managed folder roots.
 - Database dumps created by the “Create Database Dump” job are saved under `backups/` within the S3 prefix.
