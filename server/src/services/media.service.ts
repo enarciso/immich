@@ -3,7 +3,6 @@ import { createReadStream, createWriteStream, promises as fs } from 'node:fs';
 import os from 'node:os';
 import { extname } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { S3AppStorageBackend } from 'src/storage/s3-backend';
 import { SystemConfig } from 'src/config';
 import { FACE_THUMBNAIL_SIZE, JOBS_ASSET_PAGINATION_SIZE } from 'src/constants';
 import { ImagePathOptions, StorageCore, ThumbnailPathEntity } from 'src/cores/storage.core';
@@ -33,6 +32,7 @@ import {
 import { AssetJobRepository } from 'src/repositories/asset-job.repository';
 import { BoundingBox } from 'src/repositories/machine-learning.repository';
 import { BaseService } from 'src/services/base.service';
+import { S3AppStorageBackend } from 'src/storage/s3-backend';
 import {
   AudioStreamInfo,
   DecodeToBufferOptions,
@@ -73,22 +73,21 @@ export class MediaService extends BaseService {
     }
     const env = this.configRepository.getEnv();
     const s3c = env.storage.s3;
-    if (env.storage.engine === 's3' && s3c && s3c.bucket) {
-      this._s3 = new S3AppStorageBackend({
-        endpoint: s3c.endpoint,
-        region: s3c.region || 'us-east-1',
-        bucket: s3c.bucket,
-        prefix: s3c.prefix,
-        forcePathStyle: s3c.forcePathStyle,
-        useAccelerate: s3c.useAccelerate,
-        accessKeyId: s3c.accessKeyId,
-        secretAccessKey: s3c.secretAccessKey,
-        sse: s3c.sse as any,
-        sseKmsKeyId: s3c.sseKmsKeyId,
-      });
-    } else {
-      this._s3 = null;
-    }
+    this._s3 =
+      env.storage.engine === 's3' && s3c && s3c.bucket
+        ? new S3AppStorageBackend({
+            endpoint: s3c.endpoint,
+            region: s3c.region || 'us-east-1',
+            bucket: s3c.bucket,
+            prefix: s3c.prefix,
+            forcePathStyle: s3c.forcePathStyle,
+            useAccelerate: s3c.useAccelerate,
+            accessKeyId: s3c.accessKeyId,
+            secretAccessKey: s3c.secretAccessKey,
+            sse: s3c.sse as any,
+            sseKmsKeyId: s3c.sseKmsKeyId,
+          })
+        : null;
     return this._s3;
   }
 
@@ -103,7 +102,7 @@ export class MediaService extends BaseService {
     }
     const s3 = this.getS3()!;
     const tmp = StorageCore.getTempPathInDir(os.tmpdir());
-    await fs.mkdir(tmp.substring(0, tmp.lastIndexOf('/')), { recursive: true }).catch(() => {});
+    await fs.mkdir(tmp.slice(0, tmp.lastIndexOf('/')), { recursive: true }).catch(() => {});
     const stream = await s3.readStream(path);
     await pipeline(stream, createWriteStream(tmp));
     return { localPath: tmp, cleanup: () => fs.rm(tmp, { force: true }).then(() => {}) };
@@ -121,7 +120,7 @@ export class MediaService extends BaseService {
     const ext = extname(path);
     const tmpBase = StorageCore.getTempPathInDir(os.tmpdir());
     const tmp = ext ? `${tmpBase}${ext}` : tmpBase;
-    await fs.mkdir(tmp.substring(0, tmp.lastIndexOf('/')), { recursive: true }).catch(() => {});
+    await fs.mkdir(tmp.slice(0, tmp.lastIndexOf('/')), { recursive: true }).catch(() => {});
     const commit = async () => {
       const { stream, done } = await s3.writeStream(path);
       await pipeline(createReadStream(tmp), stream);
@@ -130,7 +129,6 @@ export class MediaService extends BaseService {
     const cleanup = () => fs.rm(tmp, { force: true }).then(() => {});
     return { localPath: tmp, commit, cleanup };
   }
-
 
   @OnEvent({ name: 'AppBootstrap', workers: [ImmichWorker.Microservices] })
   async onBootstrap() {
@@ -320,12 +318,17 @@ export class MediaService extends BaseService {
   }
 
   private async extractImage(originalPath: string, minSize: number) {
-    let extracted = await this.mediaRepository.extract(originalPath);
-    if (extracted && !(await this.shouldUseExtractedImage(extracted.buffer, minSize))) {
-      extracted = null;
-    }
+    const staged = await this.stageInputIfS3(originalPath);
+    try {
+      let extracted = await this.mediaRepository.extract(staged.localPath);
+      if (extracted && !(await this.shouldUseExtractedImage(extracted.buffer, minSize))) {
+        extracted = null;
+      }
 
-    return extracted;
+      return extracted;
+    } finally {
+      await staged.cleanup();
+    }
   }
 
   private async decodeImage(thumbSource: string | Buffer, exifInfo: ThumbnailAsset['exifInfo'], targetSize?: number) {
@@ -343,37 +346,43 @@ export class MediaService extends BaseService {
   }
 
   private async extractOriginalImage(asset: ThumbnailAsset, image: SystemConfig['image'], useEdits = false) {
-    const extractEmbedded = image.extractEmbedded && mimeTypes.isRaw(asset.originalFileName);
-    const extracted = extractEmbedded ? await this.extractImage(asset.originalPath, image.preview.size) : null;
-    const generateFullsize =
-      ((image.fullsize.enabled || asset.exifInfo.projectionType === 'EQUIRECTANGULAR') &&
-        !mimeTypes.isWebSupportedImage(asset.originalPath)) ||
-      useEdits;
-    const convertFullsize = generateFullsize && (!extracted || !mimeTypes.isWebSupportedImage(` .${extracted.format}`));
+    const stagedOriginal = await this.stageInputIfS3(asset.originalPath);
+    try {
+      const extractEmbedded = image.extractEmbedded && mimeTypes.isRaw(asset.originalFileName);
+      const extracted = extractEmbedded ? await this.extractImage(stagedOriginal.localPath, image.preview.size) : null;
+      const generateFullsize =
+        ((image.fullsize.enabled || asset.exifInfo.projectionType === 'EQUIRECTANGULAR') &&
+          !mimeTypes.isWebSupportedImage(asset.originalFileName)) ||
+        useEdits;
+      const convertFullsize =
+        generateFullsize && (!extracted || !mimeTypes.isWebSupportedImage(`.${extracted.format}`));
 
-    const thumbSource = extracted ? extracted.buffer : asset.originalPath;
-    const { data, info, colorspace } = await this.decodeImage(
-      thumbSource,
-      // only specify orientation to extracted images which don't have EXIF orientation data
-      // or it can double rotate the image
-      extracted ? asset.exifInfo : { ...asset.exifInfo, orientation: null },
-      convertFullsize ? undefined : image.preview.size,
-    );
+      const thumbSource = extracted ? extracted.buffer : stagedOriginal.localPath;
+      const { data, info, colorspace } = await this.decodeImage(
+        thumbSource,
+        // only specify orientation to extracted images which don't have EXIF orientation data
+        // or it can double rotate the image
+        extracted ? asset.exifInfo : { ...asset.exifInfo, orientation: null },
+        convertFullsize ? undefined : image.preview.size,
+      );
 
-    let isTransparent = false;
-    if (!extracted && mimeTypes.canBeTransparent(asset.originalPath)) {
-      ({ isTransparent } = await this.mediaRepository.getImageMetadata(asset.originalPath));
+      let isTransparent = false;
+      if (!extracted && mimeTypes.canBeTransparent(asset.originalFileName)) {
+        ({ isTransparent } = await this.mediaRepository.getImageMetadata(stagedOriginal.localPath));
+      }
+
+      return {
+        extracted,
+        data,
+        info,
+        colorspace,
+        convertFullsize,
+        generateFullsize,
+        isTransparent,
+      };
+    } finally {
+      await stagedOriginal.cleanup();
     }
-
-    return {
-      extracted,
-      data,
-      info,
-      colorspace,
-      convertFullsize,
-      generateFullsize,
-      isTransparent,
-    };
   }
 
   private async generateImageThumbnails(asset: ThumbnailAsset, { image }: SystemConfig, useEdits: boolean = false) {
@@ -401,78 +410,97 @@ export class MediaService extends BaseService {
       isProgressive: !!image.thumbnail.progressive && thumbnailFormat !== ImageFormat.Webp,
       isTransparent,
     });
-    this.storageCore.ensureFolders(previewFile.path);
-
-    // generate final images
-    const baseOptions = { colorspace, processInvalidImages: false, raw: info, edits: useEdits ? asset.edits : [] };
-    const thumbnailOptions = { ...image.thumbnail, ...baseOptions, format: thumbnailFormat };
-    const previewOptions = { ...image.preview, ...baseOptions, format: previewFormat };
-    const promises = [
-      this.mediaRepository.generateThumbhash(data, baseOptions),
-      this.mediaRepository.generateThumbnail(data, thumbnailOptions, thumbnailFile.path),
-      this.mediaRepository.generateThumbnail(data, previewOptions, previewFile.path),
-    ];
-
+    const previewOutput = await this.stageOutputIfS3(previewFile.path);
+    const thumbnailOutput = await this.stageOutputIfS3(thumbnailFile.path);
+    const stagedOutputs = [previewOutput, thumbnailOutput];
     let fullsizeFile: UpsertFileOptions | undefined;
-    if (convertFullsize) {
-      const fullsizeFormat = image.fullsize.format;
-      this.warnOnTransparencyLoss(isTransparent, fullsizeFormat, asset.id);
-      // convert a new fullsize image from the same source as the thumbnail
-      fullsizeFile = this.getImageFile(asset, {
-        fileType: AssetFileType.FullSize,
-        format: fullsizeFormat,
-        isEdited: useEdits,
-        isProgressive: !!image.fullsize.progressive && fullsizeFormat !== ImageFormat.Webp,
-        isTransparent,
-      });
-      const fullsizeOptions = {
-        ...baseOptions,
-        format: fullsizeFormat,
-        quality: image.fullsize.quality,
-        progressive: image.fullsize.progressive,
-      };
-      promises.push(this.mediaRepository.generateThumbnail(data, fullsizeOptions, fullsizeFile.path));
-    } else if (generateFullsize && extracted && extracted.format === RawExtractedFormat.Jpeg) {
-      fullsizeFile = this.getImageFile(asset, {
-        fileType: AssetFileType.FullSize,
-        format: extracted.format,
-        isEdited: false,
-        isProgressive: !!image.fullsize.progressive && image.fullsize.format !== ImageFormat.Webp,
-        isTransparent,
-      });
-      this.storageCore.ensureFolders(fullsizeFile.path);
+    let fullsizeOutput: { localPath: string; commit: () => Promise<void>; cleanup: () => Promise<void> } | undefined;
 
-      // Write the buffer to disk with essential EXIF data
-      await this.storageRepository.createOrOverwriteFile(fullsizeFile.path, extracted.buffer);
-      await this.mediaRepository.writeExif(
-        {
-          orientation: asset.exifInfo.orientation,
-          colorspace: asset.exifInfo.colorspace,
-        },
-        fullsizeFile.path,
-      );
-    }
+    try {
+      this.storageCore.ensureFolders(previewOutput.localPath);
 
-    const outputs = await Promise.all(promises);
-
-    if (asset.exifInfo.projectionType === 'EQUIRECTANGULAR') {
+      // Generate locally because Sharp operates on file paths, then upload S3-backed outputs.
+      const baseOptions = { colorspace, processInvalidImages: false, raw: info, edits: useEdits ? asset.edits : [] };
+      const thumbnailOptions = { ...image.thumbnail, ...baseOptions, format: thumbnailFormat };
+      const previewOptions = { ...image.preview, ...baseOptions, format: previewFormat };
       const promises = [
-        this.mediaRepository.copyTagGroup('XMP-GPano', asset.originalPath, previewFile.path),
-        fullsizeFile
-          ? this.mediaRepository.copyTagGroup('XMP-GPano', asset.originalPath, fullsizeFile.path)
-          : Promise.resolve(),
+        this.mediaRepository.generateThumbhash(data, baseOptions),
+        this.mediaRepository.generateThumbnail(data, thumbnailOptions, thumbnailOutput.localPath),
+        this.mediaRepository.generateThumbnail(data, previewOptions, previewOutput.localPath),
       ];
-      await Promise.all(promises);
+
+      if (convertFullsize) {
+        const fullsizeFormat = image.fullsize.format;
+        this.warnOnTransparencyLoss(isTransparent, fullsizeFormat, asset.id);
+        fullsizeFile = this.getImageFile(asset, {
+          fileType: AssetFileType.FullSize,
+          format: fullsizeFormat,
+          isEdited: useEdits,
+          isProgressive: !!image.fullsize.progressive && fullsizeFormat !== ImageFormat.Webp,
+          isTransparent,
+        });
+        fullsizeOutput = await this.stageOutputIfS3(fullsizeFile.path);
+        stagedOutputs.push(fullsizeOutput);
+        const fullsizeOptions = {
+          ...baseOptions,
+          format: fullsizeFormat,
+          quality: image.fullsize.quality,
+          progressive: image.fullsize.progressive,
+        };
+        promises.push(this.mediaRepository.generateThumbnail(data, fullsizeOptions, fullsizeOutput.localPath));
+      } else if (generateFullsize && extracted && extracted.format === RawExtractedFormat.Jpeg) {
+        fullsizeFile = this.getImageFile(asset, {
+          fileType: AssetFileType.FullSize,
+          format: extracted.format,
+          isEdited: false,
+          isProgressive: !!image.fullsize.progressive && image.fullsize.format !== ImageFormat.Webp,
+          isTransparent,
+        });
+        fullsizeOutput = await this.stageOutputIfS3(fullsizeFile.path);
+        stagedOutputs.push(fullsizeOutput);
+        this.storageCore.ensureFolders(fullsizeOutput.localPath);
+
+        // Write the buffer locally before committing it to the configured storage backend.
+        await this.storageRepository.createOrOverwriteFile(fullsizeOutput.localPath, extracted.buffer);
+        await this.mediaRepository.writeExif(
+          {
+            orientation: asset.exifInfo.orientation,
+            colorspace: asset.exifInfo.colorspace,
+          },
+          fullsizeOutput.localPath,
+        );
+      }
+
+      const outputs = await Promise.all(promises);
+
+      if (asset.exifInfo.projectionType === 'EQUIRECTANGULAR') {
+        const stagedOriginal = await this.stageInputIfS3(asset.originalPath);
+        try {
+          const copyPromises = [
+            this.mediaRepository.copyTagGroup('XMP-GPano', stagedOriginal.localPath, previewOutput.localPath),
+            fullsizeOutput
+              ? this.mediaRepository.copyTagGroup('XMP-GPano', stagedOriginal.localPath, fullsizeOutput.localPath)
+              : Promise.resolve(),
+          ];
+          await Promise.all(copyPromises);
+        } finally {
+          await stagedOriginal.cleanup();
+        }
+      }
+
+      await Promise.all(stagedOutputs.map((output) => output.commit()));
+
+      const decodedDimensions = { width: info.width, height: info.height };
+      const fullsizeDimensions = useEdits ? getOutputDimensions(asset.edits, decodedDimensions) : decodedDimensions;
+
+      return {
+        files: fullsizeFile ? [previewFile, thumbnailFile, fullsizeFile] : [previewFile, thumbnailFile],
+        thumbhash: outputs[0] as Buffer,
+        fullsizeDimensions,
+      };
+    } finally {
+      await Promise.all(stagedOutputs.map((output) => output.cleanup()));
     }
-
-    const decodedDimensions = { width: info.width, height: info.height };
-    const fullsizeDimensions = useEdits ? getOutputDimensions(asset.edits, decodedDimensions) : decodedDimensions;
-
-    return {
-      files: fullsizeFile ? [previewFile, thumbnailFile, fullsizeFile] : [previewFile, thumbnailFile],
-      thumbhash: outputs[0] as Buffer,
-      fullsizeDimensions,
-    };
   }
 
   @OnJob({ name: JobName.PersonGenerateThumbnail, queue: QueueName.ThumbnailGeneration })
@@ -503,37 +531,47 @@ export class MediaService extends BaseService {
       inputImage = originalPath;
     }
 
-    const { data: decodedImage, info } = await this.mediaRepository.decodeImage(inputImage, {
-      colorspace: image.colorspace,
-      processInvalidImages: process.env.IMMICH_PROCESS_INVALID_IMAGES === 'true',
-      // if this is an extracted image, it may not have orientation metadata
-      orientation: Buffer.isBuffer(inputImage) && exifOrientation ? Number(exifOrientation) : undefined,
-    });
-
+    const stagedInput = typeof inputImage === 'string' ? await this.stageInputIfS3(inputImage) : null;
+    let stagedOutput: { localPath: string; commit: () => Promise<void>; cleanup: () => Promise<void> } | undefined;
+    const localInput = stagedInput?.localPath ?? inputImage;
     const thumbnailPath = StorageCore.getPersonThumbnailPath({ id, ownerId });
-    this.storageCore.ensureFolders(thumbnailPath);
 
-    const thumbnailOptions: GenerateThumbnailOptions = {
-      colorspace: image.colorspace,
-      format: ImageFormat.Jpeg,
-      raw: info,
-      quality: image.thumbnail.quality,
-      progressive: false,
-      processInvalidImages: false,
-      size: FACE_THUMBNAIL_SIZE,
-      edits: [
-        {
-          action: AssetEditAction.Crop,
-          parameters: this.getCrop(
-            { old: { width: oldWidth, height: oldHeight }, new: { width: info.width, height: info.height } },
-            { x1, y1, x2, y2 },
-          ),
-        },
-      ],
-    };
+    try {
+      const { data: decodedImage, info } = await this.mediaRepository.decodeImage(localInput, {
+        colorspace: image.colorspace,
+        processInvalidImages: process.env.IMMICH_PROCESS_INVALID_IMAGES === 'true',
+        // if this is an extracted image, it may not have EXIF orientation metadata
+        orientation: Buffer.isBuffer(inputImage) && exifOrientation ? Number(exifOrientation) : undefined,
+      });
 
-    await this.mediaRepository.generateThumbnail(decodedImage, thumbnailOptions, thumbnailPath);
-    await this.personRepository.update({ id, thumbnailPath });
+      stagedOutput = await this.stageOutputIfS3(thumbnailPath);
+      this.storageCore.ensureFolders(stagedOutput.localPath);
+
+      const thumbnailOptions: GenerateThumbnailOptions = {
+        colorspace: image.colorspace,
+        format: ImageFormat.Jpeg,
+        raw: info,
+        quality: image.thumbnail.quality,
+        progressive: false,
+        processInvalidImages: false,
+        size: FACE_THUMBNAIL_SIZE,
+        edits: [
+          {
+            action: AssetEditAction.Crop,
+            parameters: this.getCrop(
+              { old: { width: oldWidth, height: oldHeight }, new: { width: info.width, height: info.height } },
+              { x1, y1, x2, y2 },
+            ),
+          },
+        ],
+      };
+
+      await this.mediaRepository.generateThumbnail(decodedImage, thumbnailOptions, stagedOutput.localPath);
+      await stagedOutput.commit();
+      await this.personRepository.update({ id, thumbnailPath });
+    } finally {
+      await Promise.all([stagedInput?.cleanup() ?? Promise.resolve(), stagedOutput?.cleanup() ?? Promise.resolve()]);
+    }
 
     return JobStatus.Success;
   }

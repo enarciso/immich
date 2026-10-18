@@ -1,6 +1,9 @@
 import { ShallowDehydrateObject } from 'kysely';
+import { writeFile } from 'node:fs/promises';
+import { PassThrough, Readable } from 'node:stream';
 import { OutputInfo } from 'sharp';
 import { SystemConfig } from 'src/config';
+import { StorageCore } from 'src/cores/storage.core';
 import { Exif } from 'src/database';
 import { AssetEditAction } from 'src/dtos/editing.dto';
 import {
@@ -21,6 +24,7 @@ import {
   VideoCodec,
 } from 'src/enum';
 import { MediaService } from 'src/services/media.service';
+import { S3AppStorageBackend } from 'src/storage/s3-backend';
 import { AudioStreamInfo, JobCounts, RawImageInfo, VideoFormat, VideoStreamInfo } from 'src/types';
 import { AssetFaceFactory } from 'test/factories/asset-face.factory';
 import { AssetFactory } from 'test/factories/asset.factory';
@@ -29,12 +33,46 @@ import { probeStub } from 'test/fixtures/media.stub';
 import { personThumbnailStub } from 'test/fixtures/person.stub';
 import { systemConfigStub } from 'test/fixtures/system-config.stub';
 import { getForGenerateThumbnail } from 'test/mappers';
+import { mockEnvData } from 'test/repositories/config.repository.mock';
 import { factory, newUuid } from 'test/small.factory';
 import { makeStream, newTestService, ServiceMocks } from 'test/utils';
+import { vi } from 'vitest';
 
 const fullsizeBuffer = Buffer.from('embedded image data');
 const rawBuffer = Buffer.from('raw image data');
 const extractedBuffer = Buffer.from('embedded image file');
+
+const mockS3Storage = (mocks: ServiceMocks) => {
+  const previousMediaLocation = StorageCore.getMediaLocation();
+  StorageCore.setMediaLocation('s3://test-bucket/pilot');
+  mocks.config.getEnv.mockReturnValue(
+    mockEnvData({
+      storage: {
+        ignoreMountCheckErrors: false,
+        engine: 's3',
+        s3: { bucket: 'test-bucket', prefix: 'pilot' },
+      },
+    }),
+  );
+
+  const read = vi
+    .spyOn(S3AppStorageBackend.prototype, 'readStream')
+    .mockImplementation(() => Promise.resolve(Readable.from([Buffer.from('source image')])));
+  const writtenPaths: string[] = [];
+  const write = vi.spyOn(S3AppStorageBackend.prototype, 'writeStream').mockImplementation((path) => {
+    writtenPaths.push(path);
+    const stream = new PassThrough();
+    stream.resume();
+    return Promise.resolve({ stream, done: () => Promise.resolve() });
+  });
+
+  return {
+    read,
+    write,
+    writtenPaths,
+    restore: () => StorageCore.setMediaLocation(previousMediaLocation),
+  };
+};
 
 describe(MediaService.name, () => {
   let sut: MediaService;
@@ -492,6 +530,42 @@ describe(MediaService.name, () => {
         },
       ]);
       expect(mocks.asset.update).toHaveBeenCalledWith({ id: asset.id, thumbhash: thumbhashBuffer });
+    });
+
+    it('should stage S3 originals and upload standard and edited image derivatives', async () => {
+      const originalPath = 's3://test-bucket/pilot/upload/user-id/12/34/asset.jpg';
+      const asset = AssetFactory.from({ originalPath }).edit().exif().build();
+      mocks.assetJob.getForGenerateThumbnailJob.mockResolvedValue(getForGenerateThumbnail(asset));
+      mocks.media.generateThumbnail.mockImplementation(async (_input, _options, output) => {
+        await writeFile(output, Buffer.from('generated image'));
+      });
+      const { read, write, writtenPaths, restore } = mockS3Storage(mocks);
+
+      try {
+        await expect(sut.handleGenerateThumbnails({ id: asset.id })).resolves.toBe(JobStatus.Success);
+
+        expect(read).toHaveBeenCalledWith(originalPath);
+        expect(mocks.media.decodeImage).toHaveBeenCalledTimes(2);
+        expect(
+          mocks.media.decodeImage.mock.calls.every(
+            ([input]) => typeof input === 'string' && !input.startsWith('s3://'),
+          ),
+        ).toBe(true);
+        expect(write).toHaveBeenCalledTimes(5);
+        expect(writtenPaths).toEqual(
+          expect.arrayContaining([
+            expect.stringContaining(`/${asset.id}_thumbnail.webp`),
+            expect.stringContaining(`/${asset.id}_preview.jpeg`),
+            expect.stringContaining(`/${asset.id}_thumbnail_edited.webp`),
+            expect.stringContaining(`/${asset.id}_preview_edited.jpeg`),
+            expect.stringContaining(`/${asset.id}_fullsize_edited.jpeg`),
+          ]),
+        );
+      } finally {
+        read.mockRestore();
+        write.mockRestore();
+        restore();
+      }
     });
 
     it('should generate a thumbnail for a video', async () => {
@@ -1575,6 +1649,32 @@ describe(MediaService.name, () => {
         expect.any(String),
       );
       expect(mocks.person.update).toHaveBeenCalledWith({ id: person.id, thumbnailPath: expect.any(String) });
+    });
+
+    it('should stage S3 face image inputs and upload the face thumbnail', async () => {
+      const person = PersonFactory.create();
+      const originalPath = 's3://test-bucket/pilot/upload/user-id/12/34/face.jpg';
+      mocks.person.getDataForThumbnailGenerationJob.mockResolvedValue({
+        ...personThumbnailStub.newThumbnailMiddle,
+        originalPath,
+      });
+      mocks.media.generateThumbnail.mockImplementation(async (_input, _options, output) => {
+        await writeFile(output, Buffer.from('generated face thumbnail'));
+      });
+      const { read, write, writtenPaths, restore } = mockS3Storage(mocks);
+
+      try {
+        await expect(sut.handleGeneratePersonThumbnail({ id: person.id })).resolves.toBe(JobStatus.Success);
+
+        expect(read).toHaveBeenCalledWith(originalPath);
+        expect(mocks.media.decodeImage).toHaveBeenCalledWith(expect.not.stringMatching(/^s3:\/\//), expect.any(Object));
+        expect(write).toHaveBeenCalledOnce();
+        expect(writtenPaths).toEqual([expect.stringMatching(/^s3:\/\/test-bucket\/pilot\/thumbs\/.+\.jpeg$/)]);
+      } finally {
+        read.mockRestore();
+        write.mockRestore();
+        restore();
+      }
     });
 
     it('should use preview path if video', async () => {
